@@ -1,0 +1,4 @@
+[workspace]
+members = [
+    "packages/halo2-circuits"
+]

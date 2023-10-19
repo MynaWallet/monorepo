@@ -1,0 +1,25 @@
+name: Research
+description: Share the Research
+labels: ["research"]
+body:
+    - type: textarea
+      attributes:
+        label: What's the purpose of this research?
+        description: explain what you want to make sure on this research (please itemize)
+        placeholder: ex) to make sure what is the difference between A and B
+      validations:
+        required: true
+    - type: textarea
+      attributes:
+          label: Concrete milestone by steps
+          description: explain what we need to do to achieve this research
+          placeholder: ex) 1. test the library
+      validations:
+        required: true
+    - type: textarea
+      attributes:
+          label: Describe references if exists
+          description: Please refer the related papers, articles or implementations if you know
+    - type: markdown
+      attributes:
+        value: Please share the progress/result on the comment below!

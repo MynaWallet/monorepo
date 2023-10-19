@@ -1,0 +1,10 @@
+node_modules/
+build/
+setup/
+artifacts/
+cache/
+
+browser/circuit_final.zkey
+browser/main.wasm
+browser/verification_key.json
+.env

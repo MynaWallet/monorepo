@@ -1,0 +1,23 @@
+{
+    "name": "myna-monorepo",
+    "private": true,
+    "version": "1.0.0",
+    "description": "AA wallet with government issued ID verification",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "workspaces": [
+        "packages/circom-circuits",
+        "packages/contracts",
+        "packages/halo2-circuits"
+    ],
+    "license": "MIT",
+    "devDependencies": {
+        "eslint": "^8.51.0",
+        "typescript": "^5.2.2"
+    },
+    "dependencies": {
+        "circomlib": "^2.0.5"
+    }
+}

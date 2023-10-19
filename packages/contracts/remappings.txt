@@ -1,0 +1,13 @@
+ds-test/=lib/forge-std/lib/ds-test/src/
+forge-std/=lib/forge-std/src/
+account-abstraction/=lib/account-abstraction/contracts/
+erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/
+openzeppelin-contracts/=lib/openzeppelin-contracts/
+openzeppelin/=lib/openzeppelin-contracts/contracts/
+@account-abstraction/=lib/account-abstraction/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@libraries/=src/libraries/
+@base/=src/base/
+@managers/=src/managers/
+@interfaces/=src/interfaces/
+@auth/=src/auth/

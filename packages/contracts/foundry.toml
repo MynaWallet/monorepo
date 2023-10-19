@@ -1,0 +1,30 @@
+[profile.default]
+src = 'src'
+test = 'test'
+out = "build"
+libs = ["lib"]
+gas_reports = []
+# gas_reports_ignore = ["dev","test"]
+solc = "0.8.20"
+optimizer = true
+optimizer_runs = 100000
+via_ir = true
+
+# RPC config in .env file
+[rpc_endpoints]
+goerli = "${GOERLI_RPC_URL}"
+mumbai = "${MUMBAI_RPC_URL}"
+arbitrumgoerli = "${ARBITRUM_GOERLI_RPC_URL}"
+optimismgoerli = "${OPTIMISM_GOERLI_RPC_URL}"
+scrollgoerli = "${SCROLL_GOERLI_RPC_URL}"
+etherum = "${ETHERUM_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+optimism = "${OPTIMISM_RPC_URL}"
+polygon = "${MATIC_RPC_URL}"
+
+# Etherscan config in .env file
+[etherscan]
+mumbai = { key = "${MUMBAI_SCAN_API_KEY}", chain = "mumbai" }
+goerli = { key = "${GOERLI_SCAN_API_KEY}", chain = "goerli" }
+optimismgoerli = { key = "${OPTIMISM_GOERLI_SCAN_API_KEY}", chain = "optimism-goerli" }
+matic = { key = "${MATIC_SCAN_API_KEY}", chain = "polygon" }
