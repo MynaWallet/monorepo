@@ -45,10 +45,6 @@ Result Not Yet
 
 See more details on the [issues](https://github.com/MynaWallet/halo2-circuits/issues)
 
-## Workspace
-
-Please make sure to cut your own branch from `feature/base`.
-
 ## Specs
 
 - [Signature Verification](./spec/SignatureVerification.md)
@@ -57,11 +53,12 @@ Please make sure to cut your own branch from `feature/base`.
 
 You can refer to these repos of RSA verification circuits.
 
-- [halo2-rsa](https://github.com/zkemail/halo2-rsa/tree/feat/new_bigint)
+- [halo2-rsa](https://github.com/zkCert/halo2-rsa)
 - [zk-email-verify](https://github.com/zkemail/zk-email-verify)
-- [zkCert](https://github.com/zkCert/halo2-rsa)
+- [zkCert](https://github.com/zkCert/halo2-zkcert)
 
 ## Example Usage
+
 
 ```bash
 # `k`: degree that expresses the size of circuit (i.e., 2^k is the number of rows in the circuit)
@@ -69,13 +66,14 @@ cargo run -r gen-params --k 17
 ```
 
 ```bash
-cargo run -r gen-rsa-keys
+cargo run -r gen-rsa-keys # generate pk
 ```
 
 ```bash
-cargo run -r prove-rsa
+cargo run -r prove-rsa # verify rsa locally
 ```
 
+You need to install solc 0.8.19 or 0.8.20 locally.
 ```bash
-cargo run -r gen-rsa-verify-evm-proof
+cargo run -r gen-rsa-verify-evm-proof  # generate a verifier contract and proof inputs for evm 
 ```
