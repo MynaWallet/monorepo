@@ -6,9 +6,21 @@ MynaWallet smart contract is a contract account that complies with [ERC-4337](ht
 
 ## Preparation
 
-MynaWallet smart contract is developed using [Foundry](https://book.getfoundry.sh/getting-started/installation). Please build the [Foundry](https://book.getfoundry.sh/getting-started/installation) development environment according to the procedures in the linked page. After that, clone this repository with submodules.
+### Installing Foundry
 
- Make a copy of `.env.sample` and name it `.env`. Then, please set the environment variables according to the comments in the file. Please do not edit `.env.sample` directly as it is a sample file.
+MynaWallet smart contract is developed using [Foundry](https://book.getfoundry.sh/getting-started/installation). Please build the [Foundry](https://book.getfoundry.sh/getting-started/installation) development environment according to the procedures in the linked page.
+
+### Cloning the Repository
+
+Clone this repository with submodules.
+
+```bash
+git clone --recursive <Repository URL>
+```
+
+### Setting Environment Variables
+
+Make a copy of `.env.sample` and name it `.env`. Then, please set the environment variables according to the comments in the file. Please do not edit `.env.sample` directly as it is a sample file.
 
 ```bash
 cp .env.sample .env
@@ -28,11 +40,20 @@ anvil
 ```
 
 Edit .env file to set `PRIVATE_KEY` from the given test account and reload .env file.
+
 ```bash
 source .env
 ```
 
 #### Deploy to local node
+
+First, install the dependencies:
+
+```bash
+forge install
+```
+
+Then execute the script to deploy to the local node:
 
 ```bash
 forge script script/Deploy.s.sol:DeployLocal --broadcast --rpc-url ${LOCAL_RPC_URL}
@@ -54,10 +75,14 @@ forge build --sizes
 
 ### Test
 
+```bash
+forge test
+```
+
 #### with printing execution traces for failing tests
 
 ```bash
-forge test --vvv
+forge test -vvv
 ```
 
 #### with gas reporting
