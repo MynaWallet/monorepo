@@ -18,17 +18,17 @@ contract TestRsaVerify is Test {
     bytes internal constant MODULUS =
         hex"8f6047064f400fd2ff80ad6569c2cffc238079e2cb18648305a59b9f1f389730f9bf9b5e3e436f88065c06241c7189ba43b6adbe5ec7a979d4b42f2a450cd19e8075e5a817b04328a0d16ebfcb6bc09a96020217af6218f3765dbc129131edd004472ab45908bf02ec35b7c044e1c900f7df179fc19c94835802e58c432bc73cee54148a6f24d7316cca195791c87e07e85b07f80b71ddc15b9b053e6f0265a8e81c27c7546dea38cbb951ca71c384892b81df12c8cb0444f9e04d24d0d3323fa857075be26746f4b731a186a51cec24151597b9d31c9ef78db83f27ef0d973d4d2a2d8a9093c7118bf86322603a17d7814a05f6150963b72a275f645a099319";
 
-    function test_SuccessRsaVerify() public {
+    function test_Success() public {
         uint256 ret = SHA256_HASHED.pkcs1Sha256Verify(
             SIGNATURE,
             EXPONENT,
             MODULUS
         );
-        assertTrue(ret == 0, "pkcs1Sha256Verify failed");
+        assertTrue(ret == 0, "Expect pkcs1Sha256Verify success. Actually failed");
     }
 
     // Test to validate the prefix should start with 0x00 0x01
-    function test_ShouldHaveProperPrefix() public {
+    function test_Fail_RsaSignatureHasInvalidPrefix() public {
         bytes
             memory INVALID_MODULUS = hex"ca5cec413f678e01813c72c1386737098f0f03007d84634387abb332163d29161da824a2a2bd676463a3eb5929d84e24083e21ae2705b11ca6e5249e2516faf93c7fb5f9e5dfaf6cf3e59e43d70133c45ab1a965b2998278741e1ed30788857fa2987e75d60f461c832fdf9e41fa08f9b8d9fe4ca2081a8f46ffa371876050399718513d3b9ff2fff834ef317eb4f725d24176d127aed19e72ac0cc98dfefccadf7949b4bf494b7e6d43d4cf346bfd822c735371740c8e5b668a42617cc4ba6b91029fb0e14a30c9b3bba429c2c42929cbca00ea5053ccd48236a2235347bdf0982212e6cd9c31b2083190633836612c239555ac0df8d3ce173ede2291ce16b5";
         uint256 ret = SHA256_HASHED.pkcs1Sha256Verify(
@@ -38,14 +38,14 @@ contract TestRsaVerify is Test {
         );
         assertTrue(
             ret == 1,
-            "pkcs1Sha256Verify failed due to invalid prefix! The prefix should start with 0x00 0x01."
+            "Expect pkcs1Sha256Verify failed due to invalid prefix, the prefix should start with 0x00 0x01. Actually not encountering this issue."
         );
     }
 
     // Test to validate that the padding is as expected
     // RSA PKCS#1 v1.5 requires the padding to be in a specific format starting with 0x0001 and filled with 0xFF bytes.
     // This test verifies that the padding adheres to this specification.
-    function test_ShouldHaveValidPadding() public {
+    function test_Fail_RsaSignatureHasInvalidPaddingScheme() public {
         bytes
             memory SHA512_SIGNATURE = hex"8dd73fee384987ee90983501dfd6972e458fd40349593e55b207c9eb03dd348b5637852b6fb1413496f4a113cc1c3cd31488458af54bb0fe88973a8465267673026c3b9498848ee513ad6e3482d0a234c4f0232d503f6e4b36c33dbc84c802b40e08f01b1a1d65d7975e73b4d44d03d8fc29980b7a167b8a1b1d0dbc7cc06fc959cc0a0047e548091af3b55ea15edc5304ffd55dd5739b1d7bcc9e72f14bf844754e807fef963c9b43e54f850ec6438d6e67e11485bb3fa047994e429c606747704ac0b8f902a71b0d20c3050685bb8e99f234538f36b1f4c8f2c2b7ea5cacd4e766cd36ed2ccddf6d461aca3eb5fc9fb75634a29568e89c001c6e0013d9ba09";
         bytes
@@ -57,13 +57,13 @@ contract TestRsaVerify is Test {
         );
         assertTrue(
             ret == 2,
-            "pkcs1Sha256Verify failed due to unexpected padding! The padding should start with 0x0001 followed by 0xFF bytes until the digest info. For example: 0x0001FFFFFFFF...003031300d060960864801650304020105000420..."
+            "Expect pkcs1Sha256Verify failed due to unexpected padding, the padding should start with 0x0001 followed by 0xFF bytes until the digest info. For example: 0x0001FFFFFFFF...003031300d060960864801650304020105000420... Actually not encountering this issue."
         );
     }
 
     // Test to validate that the delimiter is 0x00
     // During signature verification, there should be a proper delimiter.
-    function test_ShouldHaveValidDelimiter() public {
+    function test_Fail_RsaSignatureHasInvalidDelimiter() public {
         bytes
             memory MD5_SIGNATURE = hex"6694e6cff07b38465f8008469e45d8a1ae805cd69ec61a8b76d2e420795a30cea3c2c36371343fe6d39a795d035235d62bda54541f36d8d24a40844216c3c43458edfd952b2dbb2271762193e7a449b61c1372e28a630619d81d996be065d28d7d2bf13770549e2f8fcd83c24a5276a8806a6262526e13b2e33677c0949d8775e2fc54ca1f540892fda5b66346faa93a9acf9b4c6c99ebae3e615dc68dc9132e271f261dc38889656c07a4630759f141d6b1f7a45f476a1f77af9ac21b0a535970e005db52923b9508cfdfc1c80dcad768caccb7147dd7c38d9dfef58beb75b2a936827adfdcd509a81bcf167f2e89454833a9de4f2a837efa5fd14961778421";
         bytes
@@ -75,13 +75,13 @@ contract TestRsaVerify is Test {
         );
         assertTrue(
             ret == 3,
-            "pkcs1Sha256Verify failed! Expected delimiter is 0x00, but no zero found."
+            "Expect pkcs1Sha256Verify failed due to unexpected delimiter, the delimiter is 0x00. Actually not encountering this issue."
         );
     }
 
     // Test to validate that the DER encoding of DigestInfo is in SHA256 format
     // During signature verification, DigestInfo should be using the correct DER encoding.
-    function test_ShouldUseProperSHA256DEREncoding() public {
+    function test_Fail_RsaSignatureHasInvalidDigestInfoCode() public {
         bytes
             memory SHA512_256_SIGNATURE = hex"ae8f62b68118b310f094122dcb87fee208823cf093b5d4be9d97a56a5b974fc7326ab9883dc2ccea10a89736fd650cda555e3a567feed4c95ae81e987930bd32ec7637bf25fe5967dfb5a38ea4b713d7c016ee8dbe7b8b14104e4d2146817e7fba35d59027c68b71f87f0a35b3c93c565c6872da0b3b368879818702e741f629e80ccc9bff5417cbf50a8a8f72a4b243d21c08bbc9b51711765baf6cadc0d7e474537d22f009ecb592aa134e9de645dcb161c5e3efde638342b96308f134215f2c720749878f11443633012f4741e30e86e73985767f969675e1c743fa4637a8467751df1bc1e5c3189c69e773422580f6c031369dcb285b79164520e87568e5";
         bytes
@@ -93,17 +93,19 @@ contract TestRsaVerify is Test {
         );
         assertTrue(
             ret == 4,
-            "pkcs1Sha256Verify failed! The DER encoding of the DigestInfo should be in SHA256 format: 0x3031300d060960864801650304020105000420."
+            "Expect pkcs1Sha256Verify failed due to invalid digest info code, the code should express sha256 encoding method: 0x3031300d060960864801650304020105000420. Actually not encountering this issue."
         );
     }
 
-    function test_FailRsaVerify() public {
+    function test_Fail_RsaSignatureHasDigestMismatchingGivenHash() public {
         bytes32 INVALID_SHA256_HASHED = hex"47707cfb91cc6bede5f48cde4f1cea391e0ed78338e9240889b045e8808b32d3";
         uint256 ret = INVALID_SHA256_HASHED.pkcs1Sha256Verify(
             SIGNATURE,
             EXPONENT,
             MODULUS
         );
-        assertTrue(ret == 5, "pkcs1Sha256Verify failed");
+        assertTrue(ret == 5,
+            "Expect pkcs1Sha256Verify failed due to digest mismatching given hash. Actually not encountering this issue."
+        );
     }
 }
