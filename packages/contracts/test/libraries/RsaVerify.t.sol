@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "forge-std/Test.sol";
 import "@libraries/RsaVerify.sol";
 
-contract TestRsaVerify is Test {
+contract pkcs1Sha256Verify is Test {
     using SolRsaVerify for bytes32;
 
     bytes32 internal constant DIGEST =
