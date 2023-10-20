@@ -1,0 +1,37 @@
+[package]
+name = "paymaster"
+version = "0.1.0"
+edition = "2021"
+authors = ["Hiro <hiroism007@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.32.0", features = ["full"] }
+
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = { version = "1.0.107", features = ["default"] }
+
+axum = { version = "0.6.20", features = ["macros"] }
+hyper = { version = "0.14.27", features = ["full"] }
+tower = { version = "0.4.12", features = ["full"] }
+tower-http = { version = "0.4.4", features = ["full"] }
+
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+thiserror = { version = "1.0.49" }
+anyhow = "1.0.40"
+
+ethers = { version = "2.0.10" }
+ethers-core = { version = "2.0.10", default-features = false }
+ethers-providers = { version = "2.0.10", default-features = false }
+ethers-signers = { version = "2.0.10", default-features = false }
+ethers-middleware = { version = "2.0.10", default-features = false }
+
+validator = { version = "0.16.1", features = ["derive"] }
+
+utoipa = { version = "4.0.0", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "4.0.0", features = ["axum"] }
+
+chrono = { version = "0.4.31", features = ["serde"] }

@@ -1,4 +1,5 @@
 [workspace]
 members = [
-    "packages/halo2-circuits"
+    "packages/halo2-circuits",
+    "packages/paymaster"
 ]

@@ -1,0 +1,8 @@
+{
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_NET_OFFLINE": true
+  },
+  "cSpell.words": [
+    "sepolia"
+  ]
+}
