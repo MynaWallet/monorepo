@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.19;
 
-import "forge-std/Test.sol";
-import "@libraries/RsaVerify.sol";
+import {Test} from "forge-std/Test.sol";
+import {SolRsaVerify} from "@libraries/RsaVerify.sol";
 
 contract pkcs1Sha256Verify is Test {
     using SolRsaVerify for bytes32;
