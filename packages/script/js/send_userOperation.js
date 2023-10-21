@@ -4,14 +4,13 @@ const NodeRSA = require("node-rsa");
 const { ethers } = require("ethers");
 require("dotenv").config({ path: path.join(__dirname, "../../../.env") });
 
+const API_KEY = process.env.MYNA_API_KEY;
 const ENDPOINT = process.env.MYNA_API_ENDPOINT;
-const BUNDLER_PRC_URL = process.env.BUNDLER_PRC_URL;
 
-const provider = new ethers.JsonRpcProvider(BUNDLER_PRC_URL);
 const apiClient = axios.create({
   baseURL: ENDPOINT,
   headers: {
-    "mynawallet-api-key": process.env.MYNA_API_KEY,
+    "mynawallet-api-key": API_KEY,
   },
 });
 

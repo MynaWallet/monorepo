@@ -7,6 +7,7 @@ require("dotenv").config({ path: path.join(__dirname, "../../../.env") });
 const ENDPOINT = process.env.MYNA_API_ENDPOINT;
 const BUNDLER_PRC_URL = process.env.BUNDLER_PRC_URL;
 const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS;
+const API_KEY = process.env.MYNA_API_KEY;
 const TRANSFER = "transferNativeToken";
 const TRANSFER_ERC721 = "transferERC721";
 const TRANSFER_ERC1155 = "transferERC1155";
@@ -19,7 +20,7 @@ const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
 const apiClient = axios.create({
   baseURL: ENDPOINT,
   headers: {
-    "mynawallet-api-key": process.env.MYNA_API_KEY,
+    "mynawallet-api-key": API_KEY,
   },
 });
 
@@ -27,7 +28,7 @@ async function getAccountAddress(modulus, salt) {
   const wa = await factory.getAddress(modulus, salt);
   const code = await provider.getCode(wa);
 
-  return [wa, code == "0x"];
+  return [wa, code];
 }
 
 function getTestRsaKey() {
@@ -82,10 +83,10 @@ async function main() {
   // get address
   const [wa, isPhantom] = await getAccountAddress(`0x${modulus}`, "0x00");
 
+  // change below as needed
   const action = TRANSFER;
   const amount = ethers.parseEther("0.001");
   const to = "0xf7C66a572A07E8D1119957EC12d22b67b2f7dc17";
-
   const { userOperation, userOpHash } = await getTBSUserOperation(
     TRANSFER,
     `0x${modulus}`,
