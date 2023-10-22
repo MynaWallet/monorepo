@@ -23,7 +23,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
-    /// Generate a setup paramter
+    /// Generate a trusted setup paramter
     GenParams {
         /// k parameter for circuit.
         #[arg(long)]
@@ -31,19 +31,21 @@ enum Commands {
         #[arg(short, long, default_value = "./params")]
         params_path: String,
     },
-    /// Generate proving keys for RSA circuit
+    /// Generate the proving key and the verification key for RSA circuit
     GenRsaKeys {
         /// k parameter for circuit.
         #[arg(long, default_value = "17")]
         k: u32,
-        /// setup parameters path
+        /// trusted setup parameters path
         #[arg(short, long, default_value = "./params")]
         params_path: String,
         /// proving key path
         #[arg(long, default_value = "./build/rsa.pk")]
         pk_path: String,
+        // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
+        // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
     },
@@ -51,14 +53,16 @@ enum Commands {
         /// k parameter for circuit.
         #[arg(long, default_value = "17")]
         k: u32,
-        /// setup parameters path
+        /// trusted setup parameters path
         #[arg(short, long, default_value = "./params")]
         params_path: String,
         /// proving key path
         #[arg(long, default_value = "./build/rsa.pk")]
         pk_path: String,
+        // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
+        // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
         /// output proof file
@@ -69,14 +73,16 @@ enum Commands {
         /// k parameter for circuit.
         #[arg(long, default_value = "17")]
         k: u32,
-        /// setup parameters path
+        /// trusted setup parameters path
         #[arg(short, long, default_value = "./params")]
         params_path: String,
         /// proving key path
         #[arg(long, default_value = "./build/rsa.pk")]
         pk_path: String,
+        // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
+        // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
         /// output proof file
