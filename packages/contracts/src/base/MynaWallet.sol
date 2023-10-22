@@ -11,7 +11,6 @@ import "@managers/EntryPointManager.sol";
 import "@managers/EIP1271Manager.sol";
 import {SolRsaVerify} from "@libraries/RsaVerify.sol";
 import {Errors} from "@libraries/Errors.sol";
-import { IRsaVerifier } from "../interfaces/IRsaVerifier.sol";
 
 /// @title MynaWallet
 /// @author a42x
@@ -27,8 +26,6 @@ contract MynaWallet is
     Initializable
 {
     using SolRsaVerify for bytes32;
-
-    address constant RSA_VERIFIER_ADDRESS = 0xE042A2524DF80121dD25B40D1749D39dC34B27FF;
 
     // @notice Event which will be emitted when this contract is initalized
     event MynaWalletInitialized(IEntryPoint indexed entryPoint, bytes modulus);
@@ -165,58 +162,9 @@ contract MynaWallet is
         returns (uint256 validationData)
     {
         bytes32 hashed = sha256(abi.encode(userOpHash));
-        uint256 hashedInU256 = uint256(hashed);
-        (uint[2] memory _pA, uint[2][2] memory _pB, uint[2] memory _pC, uint[21] memory _pubSignals) = parseBytesToVerifierInput(userOp.signature);
-        require(_pubSignals[20] == hashedInU256, "Invalid user");
-        bool ret = IRsaVerifier(RSA_VERIFIER_ADDRESS).verifyProof(
-            _pA,
-            _pB,
-            _pC,
-            _pubSignals
-        );
-        if (!ret) return SIG_VALIDATION_FAILED;
-    }
-
-    function parseBytesToVerifierInput(bytes memory bytesData) 
-        internal 
-        pure 
-        returns (uint[2] memory _pA, uint[2][2] memory _pB, uint[2] memory _pC, uint[21] memory _pubSignals) 
-    {
-        require(bytesData.length == 928, "Invalid input!");
-        uint cnt = 0;
-        for (uint i = 0; i < 2; i++) {
-            _pA[i] = sliceUint(bytesData, cnt * 32);
-            cnt ++;
-        }
-
-        for (uint i = 0; i < 2; i++) {
-            for (uint j = 0; j < 2; j++) {
-                _pB[i][j] = sliceUint(bytesData, cnt * 32);
-                cnt ++;
-            }
-        }
-
-        for (uint i = 0; i < 2; i++) {
-            _pC[i] = sliceUint(bytesData, cnt * 32);
-            cnt ++;
-        }
-
-        for (uint i = 0; i < 21; i++) {
-            _pubSignals[i] = sliceUint(bytesData, cnt * 32);
-            cnt ++;
-        }
-    }
-
-    function sliceUint(bytes memory bs, uint start)
-        internal pure
-        returns (uint)
-    {
-        require(bs.length >= start + 32, "slicing out of range");
-        uint x;
-        assembly {
-            x := mload(add(bs, add(0x20, start)))
-        }
-        return x;
+        (bytes memory modulus, bytes memory exponent) = getOwner();
+        uint256 ret = verifyPkcs1Sha256(hashed, userOp.signature, exponent, modulus);
+        if (ret != 0) return SIG_VALIDATION_FAILED;
     }
 
     /**
