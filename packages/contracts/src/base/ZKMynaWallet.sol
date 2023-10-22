@@ -153,11 +153,11 @@ contract ZKMynaWallet is
         }
         (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[21] memory _pubSignals) =
             _splitToProof(userOp.signature);
-        bytes32 proofHashed = _concatBytes([_pubSignals[18], _pubSignals[19], _pubSignals[20]]);
+        bytes32 userOpHashInPublicSignals = _concatBytes([_pubSignals[18], _pubSignals[19], _pubSignals[20]]);
         bytes32 hashed = sha256(abi.encode(userOpHash));
 
         // use public value that sent from entryPoint
-        if (hashed != proofHashed) {
+        if (hashed != userOpHashInPublicSignals) {
             return 1;
         }
 
