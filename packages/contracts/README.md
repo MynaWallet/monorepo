@@ -106,3 +106,9 @@ forge script script/Deploy.s.sol:DeployFactory --broadcast --rpc-url ${SEPOLIA_R
 ```bash
 forge script script/Deploy.s.sol:DeployPaymaster --broadcast --rpc-url ${SEPOLIA_RPC_URL} --verify --etherscan-api-key ${SEPOLIA_SCAN_API_KEY}
 ```
+
+### ZKFactory
+
+```bash
+forge script script/Deploy.s.sol:DeployZKFactory --broadcast --rpc-url ${MUMBAI_RPC_URL} --verify --etherscan-api-key ${MUMBAI_SCAN_API_KEY}
+```

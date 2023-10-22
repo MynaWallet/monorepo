@@ -1,21 +1,21 @@
-const axios = require("axios");
-const path = require("path");
-const NodeRSA = require("node-rsa");
-const { ethers } = require("ethers");
-require("dotenv").config({ path: path.join(__dirname, "../../../.env") });
+const axios = require('axios')
+const path = require('path')
+const NodeRSA = require('node-rsa')
+const { ethers } = require('ethers')
+require('dotenv').config({ path: path.join(__dirname, '../../../.env') })
 
-const API_KEY = process.env.MYNA_API_KEY;
-const ENDPOINT = process.env.MYNA_API_ENDPOINT;
+const API_KEY = process.env.MYNA_API_KEY
+const ENDPOINT = process.env.MYNA_API_ENDPOINT
 
 const apiClient = axios.create({
-  baseURL: ENDPOINT,
-  headers: {
-    "mynawallet-api-key": API_KEY,
-  },
-});
+    baseURL: ENDPOINT,
+    headers: {
+        'mynawallet-api-key': API_KEY
+    }
+})
 
 function getTestRsaKey() {
-  return new NodeRSA(`-----BEGIN RSA PRIVATE KEY-----
+    return new NodeRSA(`-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAj2BHBk9AD9L/gK1lacLP/COAeeLLGGSDBaWbnx84lzD5v5te
 PkNviAZcBiQccYm6Q7atvl7HqXnUtC8qRQzRnoB15agXsEMooNFuv8trwJqWAgIX
 r2IY83ZdvBKRMe3QBEcqtFkIvwLsNbfAROHJAPffF5/BnJSDWALljEMrxzzuVBSK
@@ -41,43 +41,43 @@ DsF4rgjwrgES/JGKKXiNC8AQykfdwfU1WnPoDh9Ie2sxx0Uy2+39eUqt5GSAp1s1
 dzm7PQKBgQDTWs2NKZuB4b6o0CEHte+SoINfHvVFDWbotJAZ//l+z1SmTlH7qb+/
 jsDhmF/uizOdlopee6fdDaIzYNxEOseI2dx3UjLk6QYqtPBCu9KJ1juSeCReMSjH
 BWhALtiQk07pmfH+zFEYEwBhZ0OKaUAZuabat21qFr0cuX1VN8jtBQ==
------END RSA PRIVATE KEY-----`);
+-----END RSA PRIVATE KEY-----`)
 }
 
 async function sendTBSUserOperation(userOperation, chainId) {
-  const body = {
-    chainId,
-    userOperation,
-  };
+    const body = {
+        chainId,
+        userOperation
+    }
 
-  const { data } = await apiClient.post("/sendUserOperation", body);
-  return data;
+    const { data } = await apiClient.post('/sendUserOperation', body)
+    return data
 }
 
 async function main() {
-  // modulus
-  const key = getTestRsaKey();
+    // modulus
+    const key = getTestRsaKey()
 
-  // data to sign without 0x prefix
-  // userOpHash is got from get_tbs_user_operation result
-  const uoHash = "";
-  const buffer = Buffer.from(uoHash, "hex");
+    // data to sign without 0x prefix
+    // userOpHash is got from get_tbs_user_operation result
+    const uoHash = ''
+    const buffer = Buffer.from(uoHash, 'hex')
 
-  const sha256ed = ethers.sha256(buffer);
-  console.log("sha256ed hashed:", sha256ed);
+    const sha256ed = ethers.sha256(buffer)
+    console.log('sha256ed hashed:', sha256ed)
 
-  // sign - rsa-sha256 internally
-  const signature = key.sign(buffer, "buffer", "buffer");
-  console.log("signature:", signature.toString("hex"));
+    // sign - rsa-sha256 internally
+    const signature = key.sign(buffer, 'buffer', 'buffer')
+    console.log('signature:', signature.toString('hex'))
 
-  // create userOperation
-  // please add object properties got from get_tbs_user_operation
-  const userOperation = {
-    signature: `0x${signature.toString("hex")}`,
-  };
+    // create userOperation
+    // please add object properties got from get_tbs_user_operation
+    const userOperation = {
+        signature: `0x${signature.toString('hex')}`
+    }
 
-  const res = await sendTBSUserOperation(userOperation, 80001);
-  console.log(res);
+    const res = await sendTBSUserOperation(userOperation, 80001)
+    console.log(res)
 }
 
-main().catch(console.error);
+main().catch(console.error)

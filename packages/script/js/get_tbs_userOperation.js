@@ -1,38 +1,36 @@
-const axios = require("axios");
-const path = require("path");
-const NodeRSA = require("node-rsa");
-const { ethers } = require("ethers");
-require("dotenv").config({ path: path.join(__dirname, "../../../.env") });
+const axios = require('axios')
+const path = require('path')
+const NodeRSA = require('node-rsa')
+const { ethers } = require('ethers')
+require('dotenv').config({ path: path.join(__dirname, '../../../.env') })
 
-const ENDPOINT = process.env.MYNA_API_ENDPOINT;
-const BUNDLER_PRC_URL = process.env.BUNDLER_PRC_URL;
-const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS;
-const API_KEY = process.env.MYNA_API_KEY;
-const TRANSFER = "transferNativeToken";
-const TRANSFER_ERC721 = "transferERC721";
-const TRANSFER_ERC1155 = "transferERC1155";
-const FACTORY_ABI = [
-  "function getAddress(bytes, uint256) view returns (address)",
-];
+const ENDPOINT = process.env.MYNA_API_ENDPOINT
+const BUNDLER_PRC_URL = process.env.BUNDLER_PRC_URL
+const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS
+const API_KEY = process.env.MYNA_API_KEY
+const TRANSFER = 'transferNativeToken'
+const TRANSFER_ERC721 = 'transferERC721'
+const TRANSFER_ERC1155 = 'transferERC1155'
+const FACTORY_ABI = ['function getAddress(bytes, uint256) view returns (address)']
 
-const provider = new ethers.JsonRpcProvider(BUNDLER_PRC_URL);
-const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider);
+const provider = new ethers.JsonRpcProvider(BUNDLER_PRC_URL)
+const factory = new ethers.Contract(FACTORY_ADDRESS, FACTORY_ABI, provider)
 const apiClient = axios.create({
-  baseURL: ENDPOINT,
-  headers: {
-    "mynawallet-api-key": API_KEY,
-  },
-});
+    baseURL: ENDPOINT,
+    headers: {
+        'mynawallet-api-key': API_KEY
+    }
+})
 
 async function getAccountAddress(modulus, salt) {
-  const wa = await factory.getAddress(modulus, salt);
-  const code = await provider.getCode(wa);
+    const wa = await factory.getAddress(modulus, salt)
+    const code = await provider.getCode(wa)
 
-  return [wa, code];
+    return [wa, code]
 }
 
 function getTestRsaKey() {
-  return new NodeRSA(`-----BEGIN RSA PRIVATE KEY-----
+    return new NodeRSA(`-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAj2BHBk9AD9L/gK1lacLP/COAeeLLGGSDBaWbnx84lzD5v5te
 PkNviAZcBiQccYm6Q7atvl7HqXnUtC8qRQzRnoB15agXsEMooNFuv8trwJqWAgIX
 r2IY83ZdvBKRMe3QBEcqtFkIvwLsNbfAROHJAPffF5/BnJSDWALljEMrxzzuVBSK
@@ -58,45 +56,45 @@ DsF4rgjwrgES/JGKKXiNC8AQykfdwfU1WnPoDh9Ie2sxx0Uy2+39eUqt5GSAp1s1
 dzm7PQKBgQDTWs2NKZuB4b6o0CEHte+SoINfHvVFDWbotJAZ//l+z1SmTlH7qb+/
 jsDhmF/uizOdlopee6fdDaIzYNxEOseI2dx3UjLk6QYqtPBCu9KJ1juSeCReMSjH
 BWhALtiQk07pmfH+zFEYEwBhZ0OKaUAZuabat21qFr0cuX1VN8jtBQ==
------END RSA PRIVATE KEY-----`);
+-----END RSA PRIVATE KEY-----`)
 }
 
 async function getTBSUserOperation(action, modulus, to, amount, chainId) {
-  const body = {
-    action,
-    chainId,
-    to,
-    amount,
-    modulus,
-  };
+    const body = {
+        action,
+        chainId,
+        to,
+        amount,
+        modulus
+    }
 
-  const { data } = await apiClient.post("/buildUserOperation", body);
-  return data;
+    const { data } = await apiClient.post('/buildUserOperation', body)
+    return data
 }
 
 async function main() {
-  // modulus
-  const key = getTestRsaKey();
-  const components = key.exportKey("components");
-  const modulus = components.n.toString("hex").replace("00", "");
+    // modulus
+    const key = getTestRsaKey()
+    const components = key.exportKey('components')
+    const modulus = components.n.toString('hex').replace('00', '')
 
-  // get address
-  const [wa, isPhantom] = await getAccountAddress(`0x${modulus}`, "0x00");
+    // get address
+    const [wa, isPhantom] = await getAccountAddress(`0x${modulus}`, '0x00')
 
-  // change below as needed
-  const action = TRANSFER;
-  const amount = ethers.parseEther("0.001");
-  const to = "0xf7C66a572A07E8D1119957EC12d22b67b2f7dc17";
-  const { userOperation, userOpHash } = await getTBSUserOperation(
-    TRANSFER,
-    `0x${modulus}`,
-    to,
-    amount.toString(),
-    80001
-  );
+    // change below as needed
+    const action = TRANSFER
+    const amount = ethers.parseEther('0.001')
+    const to = '0xf7C66a572A07E8D1119957EC12d22b67b2f7dc17'
+    const { userOperation, userOpHash } = await getTBSUserOperation(
+        TRANSFER,
+        `0x${modulus}`,
+        to,
+        amount.toString(),
+        80001
+    )
 
-  console.log(userOperation);
-  console.log("userOpHash", userOpHash);
+    console.log(userOperation)
+    console.log('userOpHash', userOpHash)
 }
 
-main().catch(console.error);
+main().catch(console.error)

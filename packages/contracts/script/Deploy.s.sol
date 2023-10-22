@@ -6,6 +6,7 @@ import "forge-std/console.sol";
 import "@account-abstraction/contracts/core/EntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import "../src/base/MynaWalletFactory.sol";
+import "../src/base/ZKMynaWalletFactory.sol";
 import "../src/base/MynaWalletPaymaster.sol";
 
 contract DeployLocal is Script {
@@ -47,6 +48,26 @@ contract DeployPaymaster is Script {
             vm.envAddress("PAYMASTER_OWNER_ADDRESS")
         );
         console.log("Deployed paymaster at: ", address(paymaster));
+        vm.stopBroadcast();
+    }
+}
+
+contract DeployZKFactory is Script {
+    function setUp() public {}
+
+    function run() public {
+        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+
+        address entryPointAddress = vm.envAddress("ENTRY_POINT_ADDRESS");
+        address verifierAddress = vm.envAddress("VERIFIER_ADDRESS");
+
+        // MynaWalletVerifier verifier = new MynaWalletVerifier();
+
+        ZKMynaWalletFactory factory = new ZKMynaWalletFactory(
+            IEntryPoint(entryPointAddress),
+            IMynaWalletVerifier(verifierAddress)
+        );
+        console.log("Deployed factory at: ", address(factory));
         vm.stopBroadcast();
     }
 }
