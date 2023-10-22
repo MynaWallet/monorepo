@@ -10,15 +10,7 @@ import "@managers/ZKOwnerManager.sol";
 import "@managers/EntryPointManager.sol";
 import "@managers/ZKEIP1271Manager.sol";
 import {Errors} from "@libraries/Errors.sol";
-
-interface IMynaWalletVerifier {
-    function verifyProof(
-        uint256[2] calldata _pA,
-        uint256[2][2] calldata _pB,
-        uint256[2] calldata _pC,
-        uint256[21] calldata _pubSignals
-    ) external view returns (bool);
-}
+import {IMynaWalletVerifier} from "@interfaces/IMynaWalletVerifier.sol";
 
 /// @title MynaWallet
 /// @author a42x
@@ -160,8 +152,8 @@ contract ZKMynaWallet is
             return 1;
         }
         (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[21] memory _pubSignals) =
-            splitToProof(userOp.signature);
-        bytes32 proofHashed = concatBytes([_pubSignals[18], _pubSignals[19], _pubSignals[20]]);
+            _splitToProof(userOp.signature);
+        bytes32 proofHashed = _concatBytes([_pubSignals[18], _pubSignals[19], _pubSignals[20]]);
         bytes32 hashed = sha256(abi.encode(userOpHash));
 
         // use public value that sent from entryPoint
@@ -179,32 +171,11 @@ contract ZKMynaWallet is
     }
 
     /**
-     * @notice Call a contract with arbitrary data and value
-     * @dev Internal function
-     * @param target target address
-     * @param value value to send
-     * @param data function call data
+     * @dev Concatenates three uint256 values into a single bytes32 value.
+     * @param arr An array of three uint256 values to concatenate.
+     * @return The concatenated bytes32 value.
      */
-    function _call(address target, uint256 value, bytes memory data) internal {
-        (bool success, bytes memory result) = target.call{value: value}(data);
-        if (!success) {
-            assembly {
-                revert(add(result, 32), mload(result))
-            }
-        }
-    }
-
-    /**
-     * @notice Upgrade this contract to a new implementation
-     * @dev Internal function
-     * @param newImplementation new implementation address
-     */
-    function _authorizeUpgrade(address newImplementation) internal view override onlySelf {
-        // TODO add time lock?
-        (newImplementation);
-    }
-
-    function concatBytes(uint256[3] memory arr) public pure returns (bytes32) {
+    function _concatBytes(uint256[3] memory arr) internal pure returns (bytes32) {
         uint256 mod = 1;
         for (uint256 idx = 0; idx < _N_CONCAT_BYTES; idx++) {
             mod = mod * 2;
@@ -218,8 +189,16 @@ contract ZKMynaWallet is
         return bytes32(ret);
     }
 
-    function splitToProof(bytes memory signature)
-        public
+    /**
+     * @dev Splits a signature into its corresponding proof elements.
+     * @param signature The signature to split.
+     * @return _pA The first element of the proof.
+     * @return _pB The second element of the proof.
+     * @return _pC The third element of the proof.
+     * @return _pubSignals The public signals of the proof.
+     */
+    function _splitToProof(bytes memory signature)
+        internal
         pure
         returns (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[21] memory _pubSignals)
     {
@@ -248,5 +227,31 @@ contract ZKMynaWallet is
         for (uint256 j = 0; j < 21; j++) {
             _pubSignals[j] = uint256(proof[j + 8]);
         }
+    }
+
+    /**
+     * @notice Call a contract with arbitrary data and value
+     * @dev Internal function
+     * @param target target address
+     * @param value value to send
+     * @param data function call data
+     */
+    function _call(address target, uint256 value, bytes memory data) internal {
+        (bool success, bytes memory result) = target.call{value: value}(data);
+        if (!success) {
+            assembly {
+                revert(add(result, 32), mload(result))
+            }
+        }
+    }
+
+    /**
+     * @notice Upgrade this contract to a new implementation
+     * @dev Internal function
+     * @param newImplementation new implementation address
+     */
+    function _authorizeUpgrade(address newImplementation) internal view override onlySelf {
+        // TODO add time lock?
+        (newImplementation);
     }
 }
