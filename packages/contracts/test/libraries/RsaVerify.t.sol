@@ -24,7 +24,7 @@ contract pkcs1Sha256Verify is Test {
             EXPONENT,
             MODULUS
         );
-        assertTrue(ret == 0, "Expect pkcs1Sha256Verify success. Actually failed");
+        assertTrue(ret == 0, "Expected pkcs1Sha256Verify to succeed, but it actually failed.");
     }
 
     // Test to validate the prefix should start with 0x00 0x01
@@ -38,7 +38,7 @@ contract pkcs1Sha256Verify is Test {
         );
         assertTrue(
             ret == 1,
-            "Expect pkcs1Sha256Verify failed due to invalid prefix, the prefix should start with 0x00 0x01. Actually not encountering this issue."
+            "Expected pkcs1Sha256Verify to fail due to an invalid prefix; the prefix should start with 0x00 0x01. However, this issue was not encountered."
         );
     }
 
@@ -57,7 +57,7 @@ contract pkcs1Sha256Verify is Test {
         );
         assertTrue(
             ret == 2,
-            "Expect pkcs1Sha256Verify failed due to unexpected padding, the padding should start with 0x0001 followed by 0xFF bytes until the digest info. For example: 0x0001FFFFFFFF...003031300d060960864801650304020105000420... Actually not encountering this issue."
+            "Expected pkcs1Sha256Verify to fail due to unexpected padding. The padding should start with 0x0001, followed by 0xFF bytes until the digest info. For example: 0x0001FFFFFFFF...003031300d060960864801650304020105000420. However, this issue was not encountered."
         );
     }
 
@@ -75,7 +75,7 @@ contract pkcs1Sha256Verify is Test {
         );
         assertTrue(
             ret == 3,
-            "Expect pkcs1Sha256Verify failed due to unexpected delimiter, the delimiter is 0x00. Actually not encountering this issue."
+            "Expected pkcs1Sha256Verify to fail due to an unexpected delimiter; the delimiter should be 0x00. However, this issue was not encountered."
         );
     }
 
@@ -93,7 +93,7 @@ contract pkcs1Sha256Verify is Test {
         );
         assertTrue(
             ret == 4,
-            "Expect pkcs1Sha256Verify failed due to invalid digest info code, the code should express sha256 encoding method: 0x3031300d060960864801650304020105000420. Actually not encountering this issue."
+            "Expected pkcs1Sha256Verify to fail due to invalid digest info code; the code should represent the SHA-256 encoding method as 0x3031300d060960864801650304020105000420. However, this issue was not encountered."
         );
     }
 
@@ -105,7 +105,7 @@ contract pkcs1Sha256Verify is Test {
             MODULUS
         );
         assertTrue(ret == 5,
-            "Expect pkcs1Sha256Verify failed due to digest mismatching given hash. Actually not encountering this issue."
+            "Expected pkcs1Sha256Verify to fail due to a digest mismatch with the given hash. However, this issue was not encountered."
         );
     }
 }
