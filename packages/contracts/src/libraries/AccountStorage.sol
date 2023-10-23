@@ -15,9 +15,11 @@ library AccountStorage {
         bytes owner;
         /// @notice buffer(gap)
         uint256[50] gap0;
+        /// @notice session key
+        bytes32 sessionKeyMerkleRoot;
+        /// @notice buffer(gap)
+        uint256[50] gap1;
     }
-
-    // TODO session key storage
 
     // TODO recovery key storage
 

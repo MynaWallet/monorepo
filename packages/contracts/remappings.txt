@@ -11,3 +11,5 @@ openzeppelin/=lib/openzeppelin-contracts/contracts/
 @managers/=src/managers/
 @interfaces/=src/interfaces/
 @auth/=src/auth/
+@factories/=src/factories/
+@utils/=src/utils/

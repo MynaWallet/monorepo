@@ -5,9 +5,9 @@ import "forge-std/Script.sol";
 import "forge-std/console.sol";
 import "@account-abstraction/contracts/core/EntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import "../src/base/MynaWalletFactory.sol";
-import "../src/base/ZKMynaWalletFactory.sol";
-import "../src/base/MynaWalletPaymaster.sol";
+import "@factories/MynaWalletFactory.sol";
+import "@factories/ZKMynaWalletFactory.sol";
+import "@base/MynaWalletPaymaster.sol";
 
 contract DeployLocal is Script {
     function setUp() public {}

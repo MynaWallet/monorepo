@@ -9,8 +9,8 @@ import "@account-abstraction/contracts/samples/callback/TokenCallbackHandler.sol
 import "@managers/OwnerManager.sol";
 import "@managers/EntryPointManager.sol";
 import "@managers/EIP1271Manager.sol";
-import {SolRsaVerify} from "@libraries/RsaVerify.sol";
 import {Errors} from "@libraries/Errors.sol";
+import {SignatureValidator, SignatureType} from "@utils/SignatureValidator.sol";
 
 /// @title MynaWallet
 /// @author a42x
@@ -25,7 +25,7 @@ contract MynaWallet is
     UUPSUpgradeable,
     Initializable
 {
-    using SolRsaVerify for bytes32;
+    using SignatureValidator for bytes;
 
     // @notice Event which will be emitted when this contract is initalized
     event MynaWalletInitialized(IEntryPoint indexed entryPoint, bytes modulus);
@@ -133,22 +133,6 @@ contract MynaWallet is
     }
 
     /**
-     * @notice Check if the givin signature is valid
-     * @param hashed hashed data
-     * @param sig signature
-     * @param exp exponent of the RSA public key
-     * @param mod modulus of the RSA public key
-     * @return 0 if valid
-     */
-    function verifyPkcs1Sha256(bytes32 hashed, bytes memory sig, bytes memory exp, bytes memory mod)
-        public
-        view
-        returns (uint256)
-    {
-        return hashed.pkcs1Sha256Verify(sig, exp, mod);
-    }
-
-    /**
      * @notice Validate UserOperation and its signature, currently only supports RSA signature
      * @dev Internal function
      * @param userOp user operation
@@ -161,10 +145,28 @@ contract MynaWallet is
         override
         returns (uint256 validationData)
     {
-        bytes32 hashed = sha256(abi.encode(userOpHash));
-        (bytes memory modulus, bytes memory exponent) = getOwner();
-        uint256 ret = verifyPkcs1Sha256(hashed, userOp.signature, exponent, modulus);
-        if (ret != 0) return SIG_VALIDATION_FAILED;
+        if (userOp.signature.length == 0) return SIG_VALIDATION_FAILED;
+
+        // Decode signature
+        (address validator, bytes memory signature) = userOp.signature.decodeUserOoerationSignature();
+        // Currently only supports self signature validator
+        if (validator != address(this)) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        // Decompose signature
+        (SignatureType signatureType, bytes memory sig) = signature.decompose();
+
+        if (signatureType == SignatureType.RSA) {
+            (bytes memory modulus, bytes memory exponent) = getOwner();
+            uint256 ret = SignatureValidator.verifyPkcs1Sha256(userOpHash, sig, exponent, modulus);
+            if (ret != 0) return SIG_VALIDATION_FAILED;
+        } else if (signatureType == SignatureType.ECDSA) {
+            // TODO
+            return SIG_VALIDATION_FAILED;
+        } else {
+            return SIG_VALIDATION_FAILED;
+        }
     }
 
     /**

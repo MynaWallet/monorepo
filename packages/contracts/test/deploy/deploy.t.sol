@@ -6,7 +6,7 @@ import "@account-abstraction/contracts/core/EntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/UserOperation.sol";
 
-import "@base/MynaWalletFactory.sol";
+import "@factories/MynaWalletFactory.sol";
 
 contract DeployTest is Test {
     EntryPoint public entryPoint;
