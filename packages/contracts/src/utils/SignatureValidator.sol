@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-
-import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {SolRsaVerify} from "@libraries/RsaVerify.sol";
 
@@ -24,6 +22,12 @@ library SignatureValidator {
     }
 
     // decompose signature to (signatureType, signature)
+
+    /**
+     * @dev Decomposes a signature into its type and the actual signature bytes.
+     * @param signature The signature to decompose.
+     * @return A tuple containing the signature type and the signature bytes.
+     */
     function decompose(bytes memory signature) internal pure returns (SignatureType, bytes memory) {
         if (signature.length == 0) {
             return (SignatureType.NONE, signature);
@@ -47,8 +51,10 @@ library SignatureValidator {
         return (signatureType, sig);
     }
 
+    function decompose
+
     /**
-     * @notice Check if the givin signature is valid
+     * @dev Check if the givin signature is valid
      * @param userOpHash hashed data
      * @param sig signature
      * @param exp exponent of the RSA public key
@@ -62,4 +68,6 @@ library SignatureValidator {
     {
         return sha256(abi.encode(userOpHash)).pkcs1Sha256Verify(sig, exp, mod);
     }
+
+
 }
