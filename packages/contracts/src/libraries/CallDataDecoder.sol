@@ -10,19 +10,6 @@ library CallDataDecoder {
         bytes4(keccak256("executeBatch(address[],uint256[],bytes[])"));
 
     /**
-     * @dev Checks if the given call data represents an `execute` or `executeBatch` function call.
-     * @param callData The call data to check.
-     * @return A boolean indicating whether the call data represents an `execute` or `executeBatch` function call.
-     */
-    function isExecuteOrExecuteBatch(bytes calldata callData) public pure returns (bool) {
-        if (callData.length < 4) return false;
-
-        bytes4 selector = bytes4(callData[0:4]);
-        return selector == _EXECUTE_SELECTOR || selector == _EXECUTE_BATCH_SELECTOR
-            || selector == _EXECUTE_BATCH_WITH_VALUE_SELECTOR;
-    }
-
-    /**
      * @dev Decodes the call data for a MynaWallet transaction.
      * @param callData The call data to decode.
      * @return An array of destination addresses, an array of values, and an array of function call data.
@@ -35,7 +22,7 @@ library CallDataDecoder {
         pure
         returns (address[] memory, uint256[] memory, bytes[] memory)
     {
-        if (isExecuteOrExecuteBatch(callData)) revert Errors.INVALID_CALLDATA();
+        if (_isExecuteOrExecuteBatch(callData)) revert Errors.INVALID_CALLDATA();
         bytes4 selector = bytes4(callData[0:4]);
 
         if (selector == _EXECUTE_SELECTOR) {
@@ -57,6 +44,19 @@ library CallDataDecoder {
         } else {
             revert Errors.ENTRYPOINT_SELECTOR_MUST_BE_EXECUTE_OR_EXECUTE_BATCH(selector);
         }
+    }
+
+    /**
+     * @dev Checks if the given call data represents an `execute` or `executeBatch` function call.
+     * @param callData The call data to check.
+     * @return A boolean indicating whether the call data represents an `execute` or `executeBatch` function call.
+     */
+    function _isExecuteOrExecuteBatch(bytes calldata callData) private pure returns (bool) {
+        if (callData.length < 4) return false;
+
+        bytes4 selector = bytes4(callData[0:4]);
+        return selector == _EXECUTE_SELECTOR || selector == _EXECUTE_BATCH_SELECTOR
+            || selector == _EXECUTE_BATCH_WITH_VALUE_SELECTOR;
     }
 
     /**

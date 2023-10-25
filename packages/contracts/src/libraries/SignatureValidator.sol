@@ -15,7 +15,7 @@ library SignatureValidator {
     using SolRsaVerify for bytes32;
 
     // Signature Invalid
-    uint256 constant SIG_INVALID = 1;
+    uint256 constant _SIG_INVALID = 1;
 
     /**
      * @dev Decomposes a signature into its type and the actual validation bytes.
@@ -90,13 +90,13 @@ library SignatureValidator {
 
         // Check if the session key is not expired
         if (block.timestamp < validAfter || block.timestamp > validUntil) {
-            return SIG_INVALID;
+            return _SIG_INVALID;
         }
 
         bytes32 leaf = keccak256(abi.encodePacked(validUntil, validAfter, sessionkeyData));
         // Check if the session key is in the merkle tree
         if (!_verifySessionkeyMerkeProof(merkleProof, leaf, merkleRoot)) {
-            return SIG_INVALID;
+            return _SIG_INVALID;
         }
 
         // Check if the session key signature is valid
@@ -105,7 +105,7 @@ library SignatureValidator {
         (address signer, ECDSA.RecoverError err) =
             ECDSA.tryRecover(ECDSA.toEthSignedMessageHash(userOpHash), sessionKeySignature);
         if (err != ECDSA.RecoverError.NoError || signer != sessionKey) {
-            return SIG_INVALID;
+            return _SIG_INVALID;
         }
     }
 

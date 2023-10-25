@@ -168,23 +168,16 @@ contract MynaWallet is
             uint256 ret = SignatureValidator.verifyPkcs1Sha256(userOpHash, sig, exponent, modulus);
             if (ret != 0) return SIG_VALIDATION_FAILED;
         } else if (validationType == ValidationType.SESSION_KEY) {
-            bytes32 merkleRoot = getSessionKeyMerkleRoot();
+            bytes32 merkleRoot = _getSessionKeyMerkleRoot();
             uint256 verified = SignatureValidator.verifySessionKey(userOpHash, sig, merkleRoot);
             if (verified != 0) return SIG_VALIDATION_FAILED;
 
-            (address[] memory addresses,, bytes[] memory actualCallData) =
-                CallDataDecoder.decodeCallData(userOp.callData);
+            // Session keys are not allowed to modify the account
+            (address[] memory addresses,,) = CallDataDecoder.decodeCallData(userOp.callData);
             for (uint256 i = 0; i < addresses.length;) {
-                bytes4 selector;
-                bytes memory acd = actualCallData[i];
-                assembly {
-                    selector := mload(add(acd, 32))
-                }
-                // todo refactor this validation logic
-                if (addresses[i] == address(this) && selector == bytes4(keccak256("setSessionKeyMerkleRoot(bytes32)")))
-                {
-                    validationData = SIG_VALIDATION_FAILED;
-                    break;
+                if (addresses[i] == address(this)) {
+                    // Because this is not signature invalidation, we revert with error.
+                    revert Errors.SESSION_KEY_NOT_ALLOWED_TO_MODIFY_ACCOUNT();
                 }
                 unchecked {
                     i++;
