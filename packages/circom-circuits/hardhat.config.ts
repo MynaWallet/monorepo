@@ -11,15 +11,15 @@ const config: HardhatUserConfig = {
       },
     },
   },
-  networks: {
-    hardhat: {
-    // コントラクトサイズが大きい場合は以下をtrueにする
-      allowUnlimitedContractSize: true
-    },
+  // networks: {
+    // hardhat: {
+    // // コントラクトサイズが大きい場合は以下をtrueにする
+    //   allowUnlimitedContractSize: true
+    // },
     // locallhost: {
     //   allowUnlimitedContractSize: true
     // }
-  }
+  // }
 };
 
 export default config;

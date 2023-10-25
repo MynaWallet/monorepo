@@ -81,8 +81,8 @@ describe("sha256 test", function () {
                 {
                     "in": stringToBitArray(input)
                 },
-                "circuits/sha256_circom/sha256_js/sha256.wasm",
-                "circuits/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
+                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
+                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
             );
             console.log("proof", proof);
             console.log("publicSignals", publicSignals);

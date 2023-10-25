@@ -21,9 +21,9 @@ import { Contract, ContractFactory } from "ethers";
 // 文字列 -> 2進数配列
 function stringToBitArray(str: string) {
     const result: Array<number> = [];
-    for(let i = 0; i < str.length; i++) {
+    for (let i = 0; i < str.length; i++) {
         const charCode = str.charCodeAt(i); // 8bitの文字コードを取得
-        for(let j = 7; j >= 0; j--) {
+        for (let j = 7; j >= 0; j--) {
             result.push((charCode >> j) & 1); // 8bitの文字コードを1bitずつ配列に格納
         }
     }
@@ -34,7 +34,7 @@ function stringToBitArray(str: string) {
 // describe: テストのグループ化
 describe("sha256 test", function () {
     // this test can take about 16 minutes
-    this.timeout(1000 * 1000); 
+    this.timeout(1000 * 1000);
     let circuit: any;
     // let VerifierFactory: ContractFactory;
     // let VerifierLibraryFactory: ContractFactory;
@@ -47,7 +47,7 @@ describe("sha256 test", function () {
     // circomサーキットを取得
     // VerifierLibraryコントラクトをデプロイしアドレスを取得
     // Verifierコントラクトをデプロイ
-    before( async function () {
+    before(async function () {
         // circom circuit
         circuit = await wasm_tester(path.join(__dirname, "circuits", "sha256.circom"));
 
@@ -56,7 +56,7 @@ describe("sha256 test", function () {
         // child = await ethers.deployContract("Child", [contract.target]);
         // // await contract.deployed();
         // console.log(child.target);
-        
+
         // solidity library contract
         VerifierLibraryContract = await ethers.deployContract("contracts/verifier_library.sol:VerifierLibrary");
         console.log("VerifierLibrary deployed to:", VerifierLibraryContract.target);
@@ -76,27 +76,27 @@ describe("sha256 test", function () {
         ["Hello World", "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"],
     ];
 
-    const test_sha256 = function(x: [string, string]){
+    const test_sha256 = function (x: [string, string]) {
         const [input, expected_hash] = x;
         console.log("input", input);
         console.log("expected_hash", expected_hash);
-        console.log(input.length*8);
+        console.log(input.length * 8);
 
         // 制約の確認
         it('Testing SHA-256 circuit Constraint', async function () {
             const witness = await circuit.calculateWitness({
-                "in" : stringToBitArray(input)
+                "in": stringToBitArray(input)
             });
             await circuit.checkConstraints(witness);
         });
 
         // 正しい証明でtrueが返ることを確認
-        it('Testing SHA-256 circuit with correct proof', async function (){
+        it('Testing SHA-256 circuit with correct proof', async function () {
             // 証明を生成
             const { proof, publicSignals } = await groth16.fullProve(
-        {
-                "in": stringToBitArray(input)
-                }, 
+                {
+                    "in": stringToBitArray(input)
+                },
                 "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
                 "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
             );
@@ -116,16 +116,78 @@ describe("sha256 test", function () {
             console.log("b", b);
             console.log("c", c);
             console.log("Input", Input);
+            const result = await VerifierContract.verifyProof(a, b, c, Input);
+            console.log(result);
 
             expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.true;
         });
 
         // 間違った証明でfalseが返ることを確認
-        // it('Testing SHA-256 circuit with incorrect proof', async function (){
-        
+        // it('Testing SHA-256 circuit with incorrect proof', async function () {
+        //     const { proof, publicSignals } = await groth16.fullProve(
+        //         {
+        //             "in": stringToBitArray(input)
+        //         },
+        //         "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
+        //         "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
+        //     );
+        //     console.log("proof", proof);
+        //     console.log("publicSignals", publicSignals);
+
+        //     const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
+
+        //     const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
+
+        //     let a = [argv[0], argv[1]];
+        //     const b = [[argv[2], argv[3]], [argv[4], argv[5]]];
+        //     const c = [argv[6], argv[7]];
+        //     const Input = argv.slice(8);
+
+        //     console.log("a", a);
+        //     console.log("b", b);
+        //     console.log("c", c);
+        //     console.log("Input", Input);
+        //     a = [
+        //         '1593332994367869238032444261388358189155131120537987106818324989472843906547',
+        //         '10557282739731478900877448887495135009127965694426126024569680877740988313063'
+        //     ];
+
+        //     // const result = await VerifierContract.verifyProof(a, b, c, Input);
+        //     // console.log(result);
+
+        //     expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.false;
+
         // });
 
         // n bit 以外の入力の場合にエラーが出ることを確認
+        it('Testing SHA-256 circuit with incorrect proof', async function () {
+            const { proof, publicSignals } = await groth16.fullProve(
+                {
+                    "in": stringToBitArray("Hello Hello World")
+                },
+                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
+                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
+            );
+            console.log("proof", proof);
+            console.log("publicSignals", publicSignals);
+
+            const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
+
+            const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
+
+            let a = [argv[0], argv[1]];
+            const b = [[argv[2], argv[3]], [argv[4], argv[5]]];
+            const c = [argv[6], argv[7]];
+            const Input = argv.slice(8);
+
+            console.log("a", a);
+            console.log("b", b);
+            console.log("c", c);
+            console.log("Input", Input);
+
+            expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.false;
+
+        });
 
         // 256bit のinputでベンチマークをとる
     }
