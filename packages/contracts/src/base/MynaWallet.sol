@@ -9,8 +9,9 @@ import "@account-abstraction/contracts/samples/callback/TokenCallbackHandler.sol
 import "@managers/OwnerManager.sol";
 import "@managers/EntryPointManager.sol";
 import "@managers/EIP1271Manager.sol";
+import "@managers/SessionKeyManager.sol";
 import {Errors} from "@libraries/Errors.sol";
-import {SignatureValidator, SignatureType} from "@utils/SignatureValidator.sol";
+import {SignatureValidator, ValidationType} from "@libraries/SignatureValidator.sol";
 
 /// @title MynaWallet
 /// @author a42x
@@ -20,6 +21,7 @@ contract MynaWallet is
     Auth,
     EntryPointManager,
     OwnerManager,
+    SessionKeyManager,
     EIP1271Manager,
     TokenCallbackHandler,
     UUPSUpgradeable,
@@ -148,22 +150,23 @@ contract MynaWallet is
         if (userOp.signature.length == 0) return SIG_VALIDATION_FAILED;
 
         // Decode signature
-        (address validator, bytes memory signature) = userOp.signature.decodeUserOoerationSignature();
+        (address validator, bytes memory signature) = userOp.signature.decodeUserOperationSignature();
         // Currently only supports self signature validator
         if (validator != address(this)) {
             return SIG_VALIDATION_FAILED;
         }
 
         // Decompose signature
-        (SignatureType signatureType, bytes memory sig) = signature.decompose();
+        (ValidationType validationType, bytes memory sig) = signature.decompose();
 
-        if (signatureType == SignatureType.RSA) {
+        // Validate signature
+        if (validationType == ValidationType.OWNER) {
             (bytes memory modulus, bytes memory exponent) = getOwner();
             uint256 ret = SignatureValidator.verifyPkcs1Sha256(userOpHash, sig, exponent, modulus);
             if (ret != 0) return SIG_VALIDATION_FAILED;
-        } else if (signatureType == SignatureType.ECDSA) {
-            // TODO
-            return SIG_VALIDATION_FAILED;
+        } else if (validationType == ValidationType.SESSION_KEY) {
+            bytes32 merkleRoot = getSessionKeyMerkleRoot();
+            validationData = SignatureValidator.verifySessionKey(userOpHash, sig, merkleRoot);
         } else {
             return SIG_VALIDATION_FAILED;
         }
