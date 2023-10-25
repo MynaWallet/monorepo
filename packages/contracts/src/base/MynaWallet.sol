@@ -10,13 +10,16 @@ import "@managers/OwnerManager.sol";
 import "@managers/EntryPointManager.sol";
 import "@managers/EIP1271Manager.sol";
 import "@managers/SessionKeyManager.sol";
+import {IMynaWallet} from "@interfaces/IMynaWallet.sol";
 import {Errors} from "@libraries/Errors.sol";
 import {SignatureValidator, ValidationType} from "@libraries/SignatureValidator.sol";
+import {CallDataDecoder} from "@libraries/CallDataDecoder.sol";
 
 /// @title MynaWallet
 /// @author a42x
 /// @notice You can use this contract for ERC-4337 compiant wallet which works with My Number Card
 contract MynaWallet is
+    IMynaWallet,
     BaseAccount,
     Auth,
     EntryPointManager,
@@ -122,7 +125,7 @@ contract MynaWallet is
      * @notice Get the entryPoint contract address
      * @return entryPoint contract address
      */
-    function entryPoint() public view override(BaseAccount) returns (IEntryPoint) {
+    function entryPoint() public view override(IMynaWallet, BaseAccount) returns (IEntryPoint) {
         return EntryPointManager._entryPoint();
     }
 
@@ -166,7 +169,27 @@ contract MynaWallet is
             if (ret != 0) return SIG_VALIDATION_FAILED;
         } else if (validationType == ValidationType.SESSION_KEY) {
             bytes32 merkleRoot = getSessionKeyMerkleRoot();
-            validationData = SignatureValidator.verifySessionKey(userOpHash, sig, merkleRoot);
+            uint256 verified = SignatureValidator.verifySessionKey(userOpHash, sig, merkleRoot);
+            if (verified != 0) return SIG_VALIDATION_FAILED;
+
+            (address[] memory addresses,, bytes[] memory actualCallData) =
+                CallDataDecoder.decodeCallData(userOp.callData);
+            for (uint256 i = 0; i < addresses.length;) {
+                bytes4 selector;
+                bytes memory acd = actualCallData[i];
+                assembly {
+                    selector := mload(add(acd, 32))
+                }
+                // todo refactor this validation logic
+                if (addresses[i] == address(this) && selector == bytes4(keccak256("setSessionKeyMerkleRoot(bytes32)")))
+                {
+                    validationData = SIG_VALIDATION_FAILED;
+                    break;
+                }
+                unchecked {
+                    i++;
+                }
+            }
         } else {
             return SIG_VALIDATION_FAILED;
         }

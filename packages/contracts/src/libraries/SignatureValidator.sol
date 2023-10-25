@@ -14,6 +14,9 @@ enum ValidationType {
 library SignatureValidator {
     using SolRsaVerify for bytes32;
 
+    // Signature Invalid
+    uint256 constant SIG_INVALID = 1;
+
     /**
      * @dev Decomposes a signature into its type and the actual validation bytes.
      * @param signature The signature to decompose.
@@ -70,12 +73,12 @@ library SignatureValidator {
      * @param userOpHash The hash of the user operation.
      * @param signature The signature.
      * @param merkleRoot The root of the merkle tree.
-     * @return 0 if the session key is valid, 1 otherwise.
+     * @return validationData 0 if the session key is valid, 1 otherwise.
      */
     function verifySessionKey(bytes32 userOpHash, bytes memory signature, bytes32 merkleRoot)
         internal
         view
-        returns (uint256)
+        returns (uint256 validationData)
     {
         (
             uint48 validUntil,
@@ -87,24 +90,23 @@ library SignatureValidator {
 
         // Check if the session key is not expired
         if (block.timestamp < validAfter || block.timestamp > validUntil) {
-            return 1;
+            return SIG_INVALID;
         }
 
         bytes32 leaf = keccak256(abi.encodePacked(validUntil, validAfter, sessionkeyData));
         // Check if the session key is in the merkle tree
         if (!_verifySessionkeyMerkeProof(merkleProof, leaf, merkleRoot)) {
-            return 1;
+            return SIG_INVALID;
         }
 
         // Check if the session key signature is valid
         // Currently sessionkeyData only contains session key address, but it may be extended in the future
         address sessionKey = abi.decode(sessionkeyData, (address));
-        (address signer, ECDSA.RecoverError err) = ECDSA.tryRecover(userOpHash, sessionKeySignature);
+        (address signer, ECDSA.RecoverError err) =
+            ECDSA.tryRecover(ECDSA.toEthSignedMessageHash(userOpHash), sessionKeySignature);
         if (err != ECDSA.RecoverError.NoError || signer != sessionKey) {
-            return 1;
+            return SIG_INVALID;
         }
-
-        return 0;
     }
 
     /**

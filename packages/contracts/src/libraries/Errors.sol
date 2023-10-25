@@ -11,4 +11,7 @@ library Errors {
     error INVALID_MODULUS(bytes modulus);
     error HASH_ALREADY_APPROVED(bytes32 hash);
     error HASH_ALREADY_REJECTED(bytes32 hash);
+    error INVALID_CALLDATA();
+    error ENTRYPOINT_SELECTOR_MUST_BE_EXECUTE_OR_EXECUTE_BATCH(bytes4 givenSelector);
+    error CANNOT_CALL_SET_SESSION_KEY_MERKLE_ROOT();
 }
