@@ -42,6 +42,8 @@ template MynaWalletVerify(n, k) {
         rsa.base_message[i] <== 0;
     }
 
+    // VERIFY MODULUS IS INCLUDED IN TBS CERT
+
     // TODO VERIFY RSA SIGNATURE FROM GOVERNMENT
 
     // CALCULATE NULLIFIER:

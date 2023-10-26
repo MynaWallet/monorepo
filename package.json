@@ -5,6 +5,7 @@
   "description": "AA wallet with government issued ID verification",
   "main": "index.js",
   "scripts": {
+    "gen_der": "node ./packages/script/js/pem_to_der.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "workspaces": [

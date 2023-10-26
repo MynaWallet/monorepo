@@ -1,11 +1,12 @@
-const { readFileSync } = require('fs')
+const fs = require('fs')
 const { join } = require('path')
 
 // Path to the PEM file containing the certificate
-const PATH = join(__dirname, '../../certs/myna_cert.pem')
+const INPUT_PATH = join(__dirname, '../../certs/secret_cert.pem');
+const OUTPUT_PATH = join(__dirname, '../../certs/der.txt');
 
 // Read the PEM file
-const pem = readFileSync(PATH, 'utf8')
+const pem = fs.readFileSync(INPUT_PATH, 'utf8')
 
 // Remove the '-----BEGIN CERTIFICATE-----' and '-----END CERTIFICATE-----' lines
 const base64String = pem
@@ -14,4 +15,9 @@ const base64String = pem
     .replace(/\n/g, '')
 
 const der = Buffer.from(base64String, 'base64')
-console.log(`0x${der.slice(-256).toString('hex')}`)
+
+// The modulus
+console.log(`0x${der.toString('hex')}`);
+fs.writeFile(OUTPUT_PATH, der.toString('hex'), (err) => {
+ if (err) throw err;
+});
