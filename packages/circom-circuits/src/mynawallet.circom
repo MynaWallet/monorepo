@@ -20,10 +20,6 @@ template CalculateHash(k) {
     signal output out <== poseidon2.out;
 }
 
-template IsModulusExist() {
-
-}
-
 template MynaWalletVerify(n, k) {
     assert(n * k > 2048); // constraints for 2048 bit RSA
     assert(n < (255 \ 2)); // we want a multiplication to fit into a circom signal
@@ -32,7 +28,6 @@ template MynaWalletVerify(n, k) {
     signal input modulus[k]; // rsa public key, verified with smart contract. split up into k parts of n bits each.
     signal input signature[k]; // rsa signature. split up into k parts of n bits each.
     signal input sha256HashedMessage[3]; // rsa message. split up into 3 parts of n bit each.
-    signal input TBSCert[k];
 
     var messageLength = (256 + n) \ n;
 
