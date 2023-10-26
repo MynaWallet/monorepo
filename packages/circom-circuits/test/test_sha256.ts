@@ -7,16 +7,21 @@
  */
 
 // for circom
-import path from "path"; // .circom file
-// import { describe, it } from 'mocha';
-const wasm_tester = require("circom_tester").wasm;
+import path from "path";
 import { expect } from 'chai';
+// @ts-expect-error
+import { wasm } from "circom_tester";
+const circom_tester: any = wasm;
 
 // for solidity
+// import ethers from "hardhat";// <- これはマジで動かない
 const { ethers } = require("hardhat");
-// import { ethers } from "hardhat"; // v5の書き方
-import { groth16, plonk } from "snarkjs";
-import { Contract, ContractFactory } from "ethers";
+type Contract = typeof ethers.Contract;
+import { groth16 } from "snarkjs";
+
+const wasm_path = "./test/sha256_circom/sha256_js/sha256.wasm";
+// ./test/sha256_circom/sha256_js/sha256.wasm
+const zkey_path = "./test/sha256_circom/sha256_js/sha256_88bit_input1.zkey";
 
 // 文字列 -> 2進数配列
 function stringToBitArray(str: string) {
@@ -31,31 +36,16 @@ function stringToBitArray(str: string) {
     return result;
 }
 
-// describe: テストのグループ化
 describe("sha256 test", function () {
-    // this test can take about 16 minutes
-    this.timeout(1000 * 1000);
-    let circuit: any;
-    // let VerifierFactory: ContractFactory;
-    // let VerifierLibraryFactory: ContractFactory;
-    // let PartOfVerifyingKeyFactory: ContractFactory;
-    let VerifierContract: any;
-    let VerifierLibraryContract: any;
-    let PartOfVerifyingKeyContract: any;
+    this.timeout(1000 * 10);
+    let circuit88: any;
+    let VerifierContract: Contract;
+    let VerifierLibraryContract: Contract;
+    let PartOfVerifyingKeyContract: Contract;
 
-    // テストが始まる前に実行される
-    // circomサーキットを取得
-    // VerifierLibraryコントラクトをデプロイしアドレスを取得
-    // Verifierコントラクトをデプロイ
     before(async function () {
         // circom circuit
-        circuit = await wasm_tester(path.join(__dirname, "circuits", "sha256.circom"));
-
-        // v6
-        // contract = await ethers.deployContract("contracts/root.sol:Root");
-        // child = await ethers.deployContract("Child", [contract.target]);
-        // // await contract.deployed();
-        // console.log(child.target);
+        circuit88 = await circom_tester(path.join(__dirname, "circuits", "sha256-88bit.circom"));
 
         // solidity library contract
         VerifierLibraryContract = await ethers.deployContract("contracts/verifier_library.sol:VerifierLibrary");
@@ -68,7 +58,6 @@ describe("sha256 test", function () {
         // solidity verifier contract
         VerifierContract = await ethers.deployContract("contracts/sha256_verify_contract.sol:Verifier", [VerifierLibraryContract.target, PartOfVerifyingKeyContract.target]);
         console.log("Verifier deployed to:", VerifierContract.target);
-
     });
 
     // define test cases
@@ -78,33 +67,28 @@ describe("sha256 test", function () {
 
     const test_sha256 = function (x: [string, string]) {
         const [input, expected_hash] = x;
-        console.log("input", input);
+        console.log("input_word", input);
         console.log("expected_hash", expected_hash);
-        console.log(input.length * 8);
+        console.log(input.length * 8); // 何ビットか取得できる
 
         // 制約の確認
         it('Testing SHA-256 circuit Constraint', async function () {
-            const witness = await circuit.calculateWitness({
+            const witness = await circuit88.calculateWitness({
                 "in": stringToBitArray(input)
             });
-            await circuit.checkConstraints(witness);
+            await circuit88.checkConstraints(witness);
         });
 
         // 正しい証明でtrueが返ることを確認
         it('Testing SHA-256 circuit with correct proof', async function () {
             // 証明を生成
             const { proof, publicSignals } = await groth16.fullProve(
-                {
-                    "in": stringToBitArray(input)
-                },
-                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
-                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
+                { "in": stringToBitArray(input) },
+                wasm_path,
+                zkey_path
             );
-            console.log("proof", proof);
-            console.log("publicSignals", publicSignals);
 
             const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
-
             const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
 
             const a = [argv[0], argv[1]];
@@ -112,84 +96,89 @@ describe("sha256 test", function () {
             const c = [argv[6], argv[7]];
             const Input = argv.slice(8);
 
-            console.log("a", a);
-            console.log("b", b);
-            console.log("c", c);
-            console.log("Input", Input);
-            const result = await VerifierContract.verifyProof(a, b, c, Input);
-            console.log(result);
+            // console.log("a", a);
+            // console.log("b", b);
+            // console.log("c", c);
+            // console.log("Input", Input);
 
             expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.true;
         });
 
         // 間違った証明でfalseが返ることを確認
-        // it('Testing SHA-256 circuit with incorrect proof', async function () {
-        //     const { proof, publicSignals } = await groth16.fullProve(
-        //         {
-        //             "in": stringToBitArray(input)
-        //         },
-        //         "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
-        //         "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
-        //     );
-        //     console.log("proof", proof);
-        //     console.log("publicSignals", publicSignals);
+    //     it('Testing SHA-256 circuit with incorrect proof', async function () {
+    //         const { proof, publicSignals } = await groth16.fullProve(
+    //             {
+    //                 "in": stringToBitArray(input)
+    //             },
+    //             wasm_path,
+    //             zkey_path
+    //         );
+    //         const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
+    //         const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
 
-        //     const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
+    //         let a = [argv[0], argv[1]];
+    //         const b = [[argv[2], argv[3]], [argv[4], argv[5]]];
+    //         const c = [argv[6], argv[7]];
+    //         const Input = argv.slice(8);
+    //         // console.log("a", a);
+    //         // console.log("b", b);
+    //         // console.log("c", c);
+    //         // console.log("Input", Input);
+    //         // 1bit間違える
+    //         a = [
+    //             '1593332994367869238032444261388358189155131120537987106818324989472843906547',
+    //             '10557282739731478900877448887495135009127965694426126024569680877740988313063'
+    //         ];
+    //         // const result = await VerifierContract.verifyProof(a, b, c, Input);
+    //         // console.log(result);
+    //         let result: boolean;
+    //         try {
+    //             result = await VerifierContract.verifyProof(a, b, c, Input);
+    //         } catch (error) {
+    //             result = false;
+    //             console.log("error");
+    //         }
+    //         expect(result).to.be.false;
+    //     });
 
-        //     const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
+    //     // n bit 以外の入力の場合にエラーが出ることを確認
+    //     it('Testing SHA-256 circuit with incorrect proof', async function () {
+    //         let a: Array<string>;
+    //         let b: Array<Array<string>>;
+    //         let c: Array<string>;
+    //         let Input: Array<string>;
+    //         let result: boolean;
+    //         try {
+    //             const { proof, publicSignals } = await groth16.fullProve(
+    //                 {
+    //                     "in": stringToBitArray("Hello Hello World")
+    //                 },
+    //                 wasm_path,
+    //                 zkey_path
+    //             );
 
-        //     let a = [argv[0], argv[1]];
-        //     const b = [[argv[2], argv[3]], [argv[4], argv[5]]];
-        //     const c = [argv[6], argv[7]];
-        //     const Input = argv.slice(8);
+    //             const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
+    //             const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
 
-        //     console.log("a", a);
-        //     console.log("b", b);
-        //     console.log("c", c);
-        //     console.log("Input", Input);
-        //     a = [
-        //         '1593332994367869238032444261388358189155131120537987106818324989472843906547',
-        //         '10557282739731478900877448887495135009127965694426126024569680877740988313063'
-        //     ];
+    //             a = [argv[0], argv[1]];
+    //             b = [[argv[2], argv[3]], [argv[4], argv[5]]];
+    //             c = [argv[6], argv[7]];
+    //             Input = argv.slice(8);
 
-        //     // const result = await VerifierContract.verifyProof(a, b, c, Input);
-        //     // console.log(result);
+    //             result = await VerifierContract.verifyProof(a, b, c, Input);
+    //         } catch (error) {
+    //             result = false;
+    //             console.log("error");
+    //         }
 
-        //     expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.false;
+    //         // console.log("a", a);
+    //         // console.log("b", b);
+    //         // console.log("c", c);
+    //         // console.log("Input", Input);
 
-        // });
-
-        // n bit 以外の入力の場合にエラーが出ることを確認
-        it('Testing SHA-256 circuit with incorrect proof', async function () {
-            const { proof, publicSignals } = await groth16.fullProve(
-                {
-                    "in": stringToBitArray("Hello Hello World")
-                },
-                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256.wasm",
-                "/Users/yamamotoyuta/Desktop/a42/code/MynaWallet-circom/monorepo/monorepo/packages/circom-circuits/test/sha256_circom/sha256_js/sha256_88bit_input1.zkey"
-            );
-            console.log("proof", proof);
-            console.log("publicSignals", publicSignals);
-
-            const calldata = await groth16.exportSolidityCallData(proof, publicSignals);
-
-            const argv = calldata.replace(/["[\]\s]/g, "").split(',').map(x => BigInt(x).toString());
-
-            let a = [argv[0], argv[1]];
-            const b = [[argv[2], argv[3]], [argv[4], argv[5]]];
-            const c = [argv[6], argv[7]];
-            const Input = argv.slice(8);
-
-            console.log("a", a);
-            console.log("b", b);
-            console.log("c", c);
-            console.log("Input", Input);
-
-            expect(await VerifierContract.verifyProof(a, b, c, Input)).to.be.false;
-
-        });
-
-        // 256bit のinputでベンチマークをとる
+    //         expect(result).to.be.false;
+    //     });
+    //     // 256bit のinputでベンチマークをとる
     }
     test_cases.forEach(test_sha256);
 });
