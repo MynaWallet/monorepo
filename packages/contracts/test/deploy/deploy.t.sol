@@ -83,8 +83,13 @@ contract DeployTest is Test {
 
         // set actual signature
         signature =
-            hex"1f546bf45c855723d8b92fd479bdb601e7816945f50f7f499a778498d79460b573a1e70763bbf5197a4be2d2ecdefe3fa2bf3eea8166757ebe77a509e57a59fe089ac0cd5c95613e895b94994583925473077b9357c146c476a58b5ee86a5166f827bb2c4f34a8955ee42eab104ad91703e1fbd8e3ad65506540276c81feace1db614ec8b4a09a17bf93043f75480004df161cd093c5f303fbc915371692f24fcf41bce1b96ef1497d8907d571097f26bb4c878e01a68bccd7fb1daf040b7cc5a964f3cf2e92209f4febcc63f20dc40f4a4d6dfda112f1200a9064396bed9732122633bc77e9467136d7082f1edc59a6197016fa8f2be686405a2dd26be00dae";
-        userOperation.signature = signature;
+            hex"3b277e317a1e535dbf3d40bdbddf8d9e3303abe5ec8224468e2f3ab268e83df079420815e930b2b9525935aaf78510e06f69d33f72da939cc0cf04177ee3f651424ef425a824c0e4a8c7992b05d8bd64c6fa705e3545c124b42f9fe1ef65c7ed859652e22dce03d6ba6ceb06792b16290125482fa117a8af3531ce981abbcc3dfc21b7f9fdbd670bec282850a1b5fb7e09d11c6d48cde58d15931a619f1219ccddd0e13f6e652ae2478c7e9e905593f30a297e11a4a85ebbcd9eff49ade085a3e1698113b28d1eb8a52115719dee92e457d147f7d095c6cad9b728f333e12ad22740101e10d28c4e093bb3c4fcb45a4775490aa957b3531f515b99eba3bf5e6c";
+
+        // validationType + actual signature
+        bytes memory actualSig = abi.encode(1, signature);
+
+        // set signature as address(sender) + (0x01 + signature)
+        userOperation.signature = abi.encode(sender, actualSig);
 
         UserOperation[] memory userOperations = new UserOperation[](1);
         userOperations[0] = userOperation;
