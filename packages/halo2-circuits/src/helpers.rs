@@ -5,10 +5,7 @@ use halo2_base::{
     AssignedValue,
     QuantumCell::{Constant, Existing},
 };
-use halo2_rsa::{
-    BigUintConfig, BigUintInstructions, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey,
-    RSASignature,
-};
+use halo2_rsa::{BigUintConfig, BigUintInstructions, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use halo2_sha256_unoptimized::Sha256Chip;
 use snark_verifier_sdk::{gen_pk, halo2::gen_snark_shplonk, Snark};
 
@@ -16,28 +13,22 @@ use itertools::Itertools;
 use num_bigint::BigUint;
 use openssl::ssl::{SslConnector, SslMethod};
 use sha2::{Digest, Sha256};
-use std::fs::File;
-use std::io::Read;
-use std::io::Write;
-use std::net::TcpStream;
-use std::vec;
-use x509_parser::pem::parse_x509_pem;
-use x509_parser::public_key::PublicKey;
+use std::{
+    fs::File,
+    io::{Read, Write},
+    net::TcpStream,
+    vec,
+};
+use x509_parser::{pem::parse_x509_pem, public_key::PublicKey};
 
 pub fn extract_public_key(cert_path: &str) -> BigUint {
     println!("{:?}", cert_path);
     let mut cert_file = File::open(cert_path).expect("Failed to open cert pem file");
     let mut cert_pem_buffer = Vec::new();
-    cert_file
-        .read_to_end(&mut cert_pem_buffer)
-        .expect("Failed to read cert PEM file");
+    cert_file.read_to_end(&mut cert_pem_buffer).expect("Failed to read cert PEM file");
 
-    let cert_pem = parse_x509_pem(&cert_pem_buffer)
-        .expect("Failed to parse cert")
-        .1;
-    let cert = cert_pem
-        .parse_x509()
-        .expect("Failed to parse PEM certificate");
+    let cert_pem = parse_x509_pem(&cert_pem_buffer).expect("Failed to parse cert").1;
+    let cert = cert_pem.parse_x509().expect("Failed to parse PEM certificate");
 
     match cert.public_key().parsed().unwrap() {
         PublicKey::RSA(public_key) => BigUint::from_bytes_be(public_key.modulus),
@@ -49,17 +40,12 @@ pub fn extract_tbs_and_sig(cert_path: &str) -> (Vec<u8>, BigUint) {
     // Read the PEM certificate from a file
     let mut cert_file = File::open(cert_path).expect("Failed to open PEM file");
     let mut cert_pem_buffer = Vec::new();
-    cert_file
-        .read_to_end(&mut cert_pem_buffer)
-        .expect("Failed to read PEM file");
+    cert_file.read_to_end(&mut cert_pem_buffer).expect("Failed to read PEM file");
 
     // Parse the PEM certificate using x509-parser
-    let cert_pem = parse_x509_pem(&cert_pem_buffer)
-        .unwrap_or_else(|e| panic!("Failed to parse PEM ${:?} {:?}", &cert_path, e))
-        .1;
-    let cert = cert_pem
-        .parse_x509()
-        .expect("Failed to parse PEM certificate");
+    let cert_pem =
+        parse_x509_pem(&cert_pem_buffer).unwrap_or_else(|e| panic!("Failed to parse PEM ${:?} {:?}", &cert_path, e)).1;
+    let cert = cert_pem.parse_x509().expect("Failed to parse PEM certificate");
 
     // Extract the TBS (To-Be-Signed) data from the certificate
     let tbs = cert.tbs_certificate.as_ref();
@@ -100,24 +86,16 @@ pub fn create_default_rsa_circuit_with_instances(
     // Hash in pure Rust vs in-circuit
     let hashed_tbs = Sha256::digest(tbs);
     println!("Hashed TBS: {:?}", hashed_tbs);
-    let mut hashed_bytes: Vec<AssignedValue<Fr>> = hashed_tbs
-        .iter()
-        .map(|limb| ctx.load_witness(Fr::from(*limb as u64)))
-        .collect_vec();
+    let mut hashed_bytes: Vec<AssignedValue<Fr>> =
+        hashed_tbs.iter().map(|limb| ctx.load_witness(Fr::from(*limb as u64))).collect_vec();
     hashed_bytes.reverse();
     let bytes_bits = hashed_bytes.len() * 8;
     let limb_bits = bigint_chip.limb_bits();
     let limb_bytes = limb_bits / 8;
     let mut hashed_u64s = vec![];
-    let bases = (0..limb_bytes)
-        .map(|i| Fr::from(1u64 << (8 * i)))
-        .map(Constant)
-        .collect_vec();
+    let bases = (0..limb_bytes).map(|i| Fr::from(1u64 << (8 * i))).map(Constant).collect_vec();
     for i in 0..(bytes_bits / limb_bits) {
-        let left = hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)]
-            .iter()
-            .map(|x| Existing(*x))
-            .collect_vec();
+        let left = hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)].iter().map(|x| Existing(*x)).collect_vec();
         let sum = bigint_chip.gate().inner_product(ctx, left, bases.clone());
         hashed_u64s.push(sum);
     }
@@ -131,13 +109,8 @@ pub fn create_default_rsa_circuit_with_instances(
     let signature = RSASignature::new(signature_bigint.clone()); // cloning might be slow
     let signature = rsa_chip.assign_signature(ctx, signature).unwrap();
 
-    let is_valid = rsa_chip
-        .verify_pkcs1v15_signature(ctx, &public_key, &hashed_u64s, &signature)
-        .unwrap();
-    rsa_chip
-        .biguint_config()
-        .gate()
-        .assert_is_const(ctx, &is_valid, &Fr::one());
+    let is_valid = rsa_chip.verify_pkcs1v15_signature(ctx, &public_key, &hashed_u64s, &signature).unwrap();
+    rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_valid, &Fr::one());
 
     // Insert input hash as public instance for circuit
     hashed_bytes.reverse();
