@@ -7,6 +7,5 @@ import "@libraries/Errors.sol";
 /// @author a42x
 /// @notice You can use this contract for owner auth
 abstract contract OwnerAuth {
-    
     function _isOwner(bytes memory modulus) internal view virtual returns (bool);
 }
