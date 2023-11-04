@@ -21,7 +21,7 @@ use std::{
 };
 use x509_parser::{pem::parse_x509_pem, public_key::PublicKey};
 
-pub fn extract_public_key(cert_path: &str) -> BigUint {
+pub fn read_nation_cert(cert_path: &str) -> BigUint {
     println!("{:?}", cert_path);
     let mut cert_file = File::open(cert_path).expect("Failed to open cert pem file");
     let mut cert_pem_buffer = Vec::new();
@@ -36,7 +36,11 @@ pub fn extract_public_key(cert_path: &str) -> BigUint {
     }
 }
 
-pub fn extract_tbs_and_sig(cert_path: &str) -> (Vec<u8>, BigUint) {
+// returns
+// - nation's signature
+// - citizen's tbs certificate
+// - citizen's public key
+pub fn read_citizen_cert(cert_path: &str) -> (BigUint, BigUint, BigUint) {
     // Read the PEM certificate from a file
     let mut cert_file = File::open(cert_path).expect("Failed to open PEM file");
     let mut cert_pem_buffer = Vec::new();
@@ -48,15 +52,18 @@ pub fn extract_tbs_and_sig(cert_path: &str) -> (Vec<u8>, BigUint) {
     let cert = cert_pem.parse_x509().expect("Failed to parse PEM certificate");
 
     // Extract the TBS (To-Be-Signed) data from the certificate
-    let tbs = cert.tbs_certificate.as_ref();
+    let tbs_bytes = cert.tbs_certificate.as_ref();
+    let tbs_biguint = BigUint::from_bytes_le(tbs_bytes);
     // println!("TBS (To-Be-Signed): {:x?}", tbs);
 
     // Extract the signature from cert 3
-    let signature_bytes = &cert.signature_value;
-    let signature_bigint = BigUint::from_bytes_be(&signature_bytes.data);
-    // println!("Signature: {:?}", signature_bigint);
+    let nation_sig_bytes = &cert.signature_value;
+    let nation_sig_biguint = BigUint::from_bytes_le(&nation_sig_bytes.data);
 
-    (tbs.to_vec(), signature_bigint)
+    let citizen_pubkey_bytes = cert.tbs_certificate.subject_pki.subject_public_key.as_ref();
+    let citizen_pubkey_biguint = BigUint::from_bytes_le(&citizen_pubkey_bytes[9..256 + 9]);
+
+    (nation_sig_biguint, tbs_biguint, citizen_pubkey_biguint)
 }
 
 pub fn create_default_rsa_circuit_with_instances(
@@ -116,7 +123,7 @@ pub fn create_default_rsa_circuit_with_instances(
     hashed_bytes.reverse();
     builder.assigned_instances[0].extend(hashed_bytes);
 
-    let circuit_params = builder.calculate_params(Some(10));
+    let circuit_params = builder.calculate_params(None);
     println!("Circuit params: {:?}", circuit_params);
     builder.use_params(circuit_params)
 }

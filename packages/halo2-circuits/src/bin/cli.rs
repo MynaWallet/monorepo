@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 use halo2_base::{
     gates::circuit::builder::BaseCircuitBuilder,
     halo2_proofs::{halo2curves::bn256::Fr, plonk::Circuit},
-    utils::fs::gen_srs,
+    utils::{fs::gen_srs, BigPrimeField},
 };
-use halo2_circuits::helpers::*;
+use halo2_circuits::{circuit, helpers::*};
 use snark_verifier_sdk::{
     evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
     gen_pk,
@@ -23,7 +23,7 @@ struct Cli {
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
     /// Generate a trusted setup paramter
-    GenParams {
+    TrustedSetup {
         /// k parameter for circuit.
         #[arg(long)]
         k: u32,
@@ -31,82 +31,43 @@ enum Commands {
         params_path: String,
     },
     /// Generate the proving key and the verification key for RSA circuit
-    GenRsaKeys {
+    Prove {
         /// k parameter for circuit.
         #[arg(long, default_value = "17")]
         k: u32,
-        /// trusted setup parameters path
+        /// trusted setup parameters path. input
         #[arg(short, long, default_value = "./params")]
         params_path: String,
-        /// proving key path
+        /// proving key path. output
         #[arg(long, default_value = "./build/rsa.pk")]
         pk_path: String,
-        // citizen's certificate
-        #[arg(long, default_value = "./certs/myna_cert.pem")]
-        verify_cert_path: String,
-        // nation's certificate
-        #[arg(long, default_value = "./certs/ca_cert.pem")]
-        issuer_cert_path: String,
-    },
-    ProveRsa {
-        /// k parameter for circuit.
-        #[arg(long, default_value = "17")]
-        k: u32,
-        /// trusted setup parameters path
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
-        /// proving key path
-        #[arg(long, default_value = "./build/rsa.pk")]
-        pk_path: String,
-        // citizen's certificate
-        #[arg(long, default_value = "./certs/myna_cert.pem")]
-        verify_cert_path: String,
-        // nation's certificate
-        #[arg(long, default_value = "./certs/ca_cert.pem")]
-        issuer_cert_path: String,
-        /// output proof file
+        /// proof path. output
         #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
         proof_path: String,
-    },
-    GenRsaVerifyEVMProof {
-        /// k parameter for circuit.
-        #[arg(long, default_value = "17")]
-        k: u32,
-        /// trusted setup parameters path
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
-        /// proving key path
-        #[arg(long, default_value = "./build/rsa.pk")]
-        pk_path: String,
         // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
         // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
-        /// output proof file
-        #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
-        proof_path: String,
+        password: u64,
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::GenParams { k, params_path } => {
+        Commands::TrustedSetup { k, params_path } => {
             env::set_var("PARAMS_DIR", params_path);
             gen_srs(k);
         }
-        Commands::GenRsaKeys { k, params_path, pk_path, verify_cert_path, issuer_cert_path } => {
-            env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
+        Commands::Prove { k, params_path, pk_path, proof_path, verify_cert_path, issuer_cert_path, password } => {
+            let nation_pubkey = read_nation_cert(&issuer_cert_path);
+            let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
 
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
-
-            let builder =
-                create_default_rsa_circuit_with_instances(k as usize, tbs, public_key_modulus, signature_bigint);
+            let public = circuit::PublicInput { nation_pubkey };
+            let private = circuit::PrivateInput { tbs_cert, nation_sig, password: Fr::from(password) };
+            let builder = circuit::proof_of_japanese_residence(public, private);
 
             if Path::new(&pk_path).exists() {
                 match remove_file(&pk_path) {
@@ -114,18 +75,6 @@ async fn main() {
                     Err(e) => println!("An error occurred: {}", e),
                 }
             }
-            gen_pk(&params, &builder, Some(Path::new(&pk_path)));
-        }
-        Commands::ProveRsa { k, params_path, pk_path, verify_cert_path, issuer_cert_path, proof_path } => {
-            env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
-
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
-
-            let builder =
-                create_default_rsa_circuit_with_instances(k as usize, tbs, public_key_modulus, signature_bigint);
-            let pk = read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
 
             if Path::new(&proof_path).exists() {
                 match remove_file(&proof_path) {
@@ -133,45 +82,61 @@ async fn main() {
                     Err(e) => println!("An error occurred: {}", e),
                 }
             }
-            gen_snark_shplonk(&params, &pk, builder.clone(), Some(Path::new(&proof_path)));
-        }
-        Commands::GenRsaVerifyEVMProof { k, params_path, pk_path, verify_cert_path, issuer_cert_path, proof_path } => {
+
             env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
+            let trusted_setup = gen_srs(k);
+            let pk = gen_pk(&trusted_setup, &builder, Some(Path::new(&pk_path)));
+            gen_snark_shplonk(&trusted_setup, &pk, builder, Some(Path::new(&proof_path)));
+        } /* Commands::GenRsaVerifyEVMProof {
+           *     k,
+           *     params_path,
+           *     pk_path,
+           *     verify_cert_path,
+           *     issuer_cert_path,
+           *     proof_path,
+           * } => {
+           *     env::set_var("PARAMS_DIR", params_path);
+           *     let params = gen_srs(k); */
 
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
+          /*     let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
+           *     let public_key_modulus = extract_public_key(&issuer_cert_path); */
 
-            let builder =
-                create_default_rsa_circuit_with_instances(k as usize, tbs, public_key_modulus, signature_bigint);
-            let pk = read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
+          /*     let builder = create_default_rsa_circuit_with_instances(
+           *         k as usize,
+           *         tbs,
+           *         public_key_modulus,
+           *         signature_bigint,
+           *     );
+           *     let pk =
+           *         read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap(); */
 
-            if Path::new(&proof_path).exists() {
-                match remove_file(&proof_path) {
-                    Ok(_) => println!("File found, overwriting..."),
-                    Err(e) => println!("An error occurred: {}", e),
-                }
-            }
-            gen_snark_shplonk(&params, &pk, builder.clone(), Some(Path::new(&proof_path)));
+          /*     if Path::new(&proof_path).exists() {
+           *         match remove_file(&proof_path) {
+           *             Ok(_) => println!("File found, overwriting..."),
+           *             Err(e) => println!("An error occurred: {}", e),
+           *         }
+           *     }
+           *     gen_snark_shplonk(&params, &pk, builder.clone(), Some(Path::new(&proof_path))); */
 
-            let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
-                &params,
-                pk.get_vk(),
-                builder.num_instance(),
-                Some(Path::new("./build/VerifyRsa.sol")),
-            );
+          /*     let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
+           *         &params,
+           *         pk.get_vk(),
+           *         builder.num_instance(),
+           *         Some(Path::new("./build/VerifyRsa.sol")),
+           *     ); */
 
-            let proof = gen_evm_proof_shplonk(&params, &pk, builder.clone(), builder.instances());
+          /*     let proof = gen_evm_proof_shplonk(&params, &pk, builder.clone(), builder.instances()); */
 
-            println!("Size of the contract: {} bytes", deployment_code.len());
-            println!("Deploying contract...");
+          /*     println!("Size of the contract: {} bytes", deployment_code.len());
+           *     println!("Deploying contract..."); */
 
-            evm_verify(deployment_code, builder.instances(), proof.clone());
+          /*     evm_verify(deployment_code, builder.instances(), proof.clone()); */
 
-            println!("Verification success!");
+          /*     println!("Verification success!"); */
 
-            write_calldata(&builder.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
-            println!("Succesfully generate calldata!");
-        }
+          /*     write_calldata(&builder.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
+           *     println!("Succesfully generate calldata!"); */
+
+          /* } */
     }
 }
