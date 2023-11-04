@@ -8,6 +8,9 @@ format:
 format_check:
 	forge fmt --check --root $(ROOT_DIR)
 
+.PHONY: test
+test:
+	forge test --root $(ROOT_DIR)
 
 setup:
 	node ./script/circom-verifier-setup.js
