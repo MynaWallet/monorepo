@@ -30,4 +30,4 @@ export-verifier:
 	snarkjs zkey export solidityverifier ./setup/circuit_final.zkey ../contracts/src/circom-verifier/verifier.sol
 
 generate-calldata:
-	snarkjs generatecall ./setup/public.json ./setup/proof.json
+	snarkjs generatecall ./setup/public.json ./setup/proof.json >> solidity-input.json

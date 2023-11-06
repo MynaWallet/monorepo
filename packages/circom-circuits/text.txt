@@ -1,0 +1,13 @@
+non-linear constraints: 795534
+linear constraints: 0
+public inputs: 20
+public outputs: 0
+private inputs: 1612
+private outputs: 0
+wires: 788387
+labels: 4468026
+[32mWritten successfully:[0m ./build/main.r1cs
+[32mWritten successfully:[0m ./build/main.sym
+[32mWritten successfully:[0m ./build/main_js/main.wasm
+[32mEverything went okay, circom safe[0m
+node build/main_js/generate_witness.js ./build/main_js/main.wasm ./setup/input.json ./setup/witness.wtns

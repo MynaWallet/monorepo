@@ -23,6 +23,7 @@ template FpPow65537Mod(n, k) {
             doublers[i].p[j] <== modulus[j];
         }
     }
+    var cnt = 1;
     for (var j = 0; j < k; j++) {
         doublers[0].a[j] <== base[j];
         doublers[0].b[j] <== base[j];

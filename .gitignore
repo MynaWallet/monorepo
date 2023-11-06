@@ -4,3 +4,4 @@ node_modules/
 target/
 packages/certs/secret*
 packages/certs/der*
+packages/certs/*.json

@@ -2,7 +2,7 @@ const fs = require('fs')
 const { join } = require('path')
 
 // Path to the PEM file containing the certificate
-const INPUT_PATH = join(__dirname, '../../certs/secret_cert.pem');
+const INPUT_PATH = join(__dirname, '../../certs/myna_cert.pem');
 const OUTPUT_PATH = join(__dirname, '../../certs/der.txt');
 
 // Read the PEM file
