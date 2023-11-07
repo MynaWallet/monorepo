@@ -2,7 +2,7 @@
 name = "halo2-circuits"
 version = "0.1.0"
 edition = "2021"
-authors = ["hiroism007"]
+authors = ["hiroism007", "chokermaxx"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,10 +21,6 @@ halo2-base = { branch = "community-edition", default-features = false, features 
     "test-utils",
 ], git = "https://github.com/axiom-crypto/halo2-lib.git" }
 halo2-ecc = { branch = "community-edition", default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], git = "https://github.com/axiom-crypto/halo2-lib.git" }
-zkevm-hashes = { branch = "feat/zkevm-sha256", default-features = false, features = [
     "halo2-axiom",
     "display",
 ], git = "https://github.com/axiom-crypto/halo2-lib.git" }

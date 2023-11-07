@@ -66,7 +66,8 @@ fn main() {
             let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
 
             let public = circuit::PublicInput { nation_pubkey };
-            let private = circuit::PrivateInput { tbs_cert, nation_sig, password: Fr::from(password) };
+            let private =
+                circuit::PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig, password: Fr::from(password) };
             let builder = circuit::proof_of_japanese_residence(public, private);
 
             if Path::new(&pk_path).exists() {

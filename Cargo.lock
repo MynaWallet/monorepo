@@ -198,12 +198,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "array-init"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
-
-[[package]]
 name = "arrayref"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2102,48 +2096,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "halo2-base"
-version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#ff0cadf7b38d2fd5e9a57781641789ac71516227"
-dependencies = [
- "getset",
- "halo2_proofs 0.2.0 (git+https://github.com/axiom-crypto/halo2.git)",
- "itertools 0.11.0",
- "log",
- "num-bigint",
- "num-integer",
- "num-traits",
- "poseidon-rs",
- "rand_chacha",
- "rayon",
- "rustc-hash",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "halo2-base"
-version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=feat/zkevm-sha256#fd90273b5f948bc9e1d5ea7ff08a49126221041e"
-dependencies = [
- "ark-std",
- "getset",
- "halo2_proofs 0.2.0 (git+https://github.com/axiom-crypto/halo2.git)",
- "itertools 0.11.0",
- "log",
- "num-bigint",
- "num-integer",
- "num-traits",
- "poseidon-rs",
- "rand",
- "rand_chacha",
- "rayon",
- "rustc-hash",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "halo2-circuits"
 version = "0.1.0"
 dependencies = [
@@ -2153,8 +2105,8 @@ dependencies = [
  "env_logger",
  "getrandom",
  "getset",
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
- "halo2-ecc 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
+ "halo2-base",
+ "halo2-ecc",
  "halo2-rsa",
  "halo2-sha256-unoptimized",
  "itertools 0.11.0",
@@ -2170,7 +2122,6 @@ dependencies = [
  "snark-verifier-sdk",
  "tokio",
  "x509-parser",
- "zkevm-hashes",
 ]
 
 [[package]]
@@ -2178,26 +2129,7 @@ name = "halo2-ecc"
 version = "0.4.0"
 source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition#980b39bcca5b3327aaef6c8d73577d9381bfa899"
 dependencies = [
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
- "itertools 0.10.5",
- "num-bigint",
- "num-integer",
- "num-traits",
- "rand",
- "rand_chacha",
- "rand_core",
- "rayon",
- "serde",
- "serde_json",
- "test-case",
-]
-
-[[package]]
-name = "halo2-ecc"
-version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop#ff0cadf7b38d2fd5e9a57781641789ac71516227"
-dependencies = [
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop)",
+ "halo2-base",
  "itertools 0.10.5",
  "num-bigint",
  "num-integer",
@@ -2217,8 +2149,8 @@ version = "0.1.0"
 source = "git+https://github.com/MynaWallet/halo2-rsa.git?branch=main#231d5421011276dfb7d6a6f84144a2dea9c9e3fe"
 dependencies = [
  "env_logger",
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
- "halo2-ecc 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
+ "halo2-base",
+ "halo2-ecc",
  "num-bigint",
  "num-traits",
  "rand",
@@ -2235,7 +2167,7 @@ dependencies = [
  "env_logger",
  "generic-array",
  "getrandom",
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
+ "halo2-base",
  "hex",
  "itertools 0.10.5",
  "num-bigint",
@@ -4442,8 +4374,8 @@ name = "snark-verifier"
 version = "0.1.6"
 source = "git+https://github.com/axiom-crypto/snark-verifier.git?branch=community-edition#7011e8ce0c2f7e79ab9629aa528cfb6837cdeafe"
 dependencies = [
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
- "halo2-ecc 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
+ "halo2-base",
+ "halo2-ecc",
  "hex",
  "itertools 0.11.0",
  "lazy_static",
@@ -4458,24 +4390,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "snark-verifier"
-version = "0.1.7"
-source = "git+https://github.com/axiom-crypto/snark-verifier.git?branch=develop#624b003c656e44b14202d4b8a16a2f7bc4e71eeb"
-dependencies = [
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop)",
- "halo2-ecc 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=develop)",
- "hex",
- "itertools 0.11.0",
- "lazy_static",
- "num-bigint",
- "num-integer",
- "num-traits",
- "pairing",
- "rand",
- "serde",
-]
-
-[[package]]
 name = "snark-verifier-sdk"
 version = "0.1.6"
 source = "git+https://github.com/axiom-crypto/snark-verifier.git?branch=community-edition#7011e8ce0c2f7e79ab9629aa528cfb6837cdeafe"
@@ -4484,7 +4398,7 @@ dependencies = [
  "bincode",
  "ethereum-types",
  "getset",
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition)",
+ "halo2-base",
  "hex",
  "itertools 0.10.5",
  "lazy_static",
@@ -4495,7 +4409,7 @@ dependencies = [
  "rand_chacha",
  "serde",
  "serde_json",
- "snark-verifier 0.1.6",
+ "snark-verifier",
 ]
 
 [[package]]
@@ -5760,25 +5674,6 @@ dependencies = [
  "sha1",
  "time",
  "zstd 0.11.2+zstd.1.5.2",
-]
-
-[[package]]
-name = "zkevm-hashes"
-version = "0.2.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=feat/zkevm-sha256#fd90273b5f948bc9e1d5ea7ff08a49126221041e"
-dependencies = [
- "array-init",
- "ethers-core",
- "getset",
- "halo2-base 0.4.0 (git+https://github.com/axiom-crypto/halo2-lib.git?branch=feat/zkevm-sha256)",
- "itertools 0.11.0",
- "lazy_static",
- "log",
- "num-bigint",
- "rand",
- "rayon",
- "sha3 0.10.8",
- "snark-verifier 0.1.7",
 ]
 
 [[package]]
