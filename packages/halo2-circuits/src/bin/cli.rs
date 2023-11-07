@@ -31,6 +31,28 @@ enum Commands {
         params_path: String,
     },
     /// Generate the proving key and the verification key for RSA circuit
+    GenerateKeys {
+        /// k parameter for circuit.
+        #[arg(long, default_value = "17")]
+        k: u32,
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./params")]
+        params_path: String,
+        /// proving key path. output
+        #[arg(long, default_value = "./build/rsa.pk")]
+        pk_path: String,
+        /// proof path. output
+        #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
+        proof_path: String,
+        // citizen's certificate
+        #[arg(long, default_value = "./certs/myna_cert.pem")]
+        verify_cert_path: String,
+        // nation's certificate
+        #[arg(long, default_value = "./certs/ca_cert.pem")]
+        issuer_cert_path: String,
+        password: u64,
+    },
+    /// Generate the proving key and the verification key for RSA circuit
     Prove {
         /// k parameter for circuit.
         #[arg(long, default_value = "17")]
@@ -61,7 +83,15 @@ fn main() {
             env::set_var("PARAMS_DIR", params_path);
             gen_srs(k);
         }
-        Commands::Prove { k, params_path, pk_path, proof_path, verify_cert_path, issuer_cert_path, password } => {
+        Commands::GenerateKeys {
+            k,
+            params_path,
+            pk_path,
+            proof_path,
+            verify_cert_path,
+            issuer_cert_path,
+            password,
+        } => {
             let nation_pubkey = read_nation_cert(&issuer_cert_path);
             let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
 
@@ -77,6 +107,19 @@ fn main() {
                 }
             }
 
+            env::set_var("PARAMS_DIR", params_path);
+            let trusted_setup = gen_srs(k);
+            gen_pk(&trusted_setup, &builder, Some(Path::new(&pk_path)));
+        }
+        Commands::Prove { k, params_path, pk_path, proof_path, verify_cert_path, issuer_cert_path, password } => {
+            let nation_pubkey = read_nation_cert(&issuer_cert_path);
+            let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
+
+            let public = circuit::PublicInput { nation_pubkey };
+            let private =
+                circuit::PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig, password: Fr::from(password) };
+            let builder = circuit::proof_of_japanese_residence(public, private);
+
             if Path::new(&proof_path).exists() {
                 match remove_file(&proof_path) {
                     Ok(_) => println!("File found, overwriting..."),
@@ -86,7 +129,7 @@ fn main() {
 
             env::set_var("PARAMS_DIR", params_path);
             let trusted_setup = gen_srs(k);
-            let pk = gen_pk(&trusted_setup, &builder, Some(Path::new(&pk_path)));
+            let pk = read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
             gen_snark_shplonk(&trusted_setup, &pk, builder, Some(Path::new(&proof_path)));
         } /* Commands::GenRsaVerifyEVMProof {
            *     k,
