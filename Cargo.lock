@@ -40,13 +40,14 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.3"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c99f64d1e06488f620f932677e24bc6e2897582980441ae90a671415bd7ec2f"
+checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
 dependencies = [
  "cfg-if",
  "once_cell",
  "version_check",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2075,7 +2076,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "halo2-base"
 version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition#980b39bcca5b3327aaef6c8d73577d9381bfa899"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition#262f5c5e074fbbb88c9decf5516568c12413ab94"
 dependencies = [
  "ark-std",
  "getset",
@@ -2127,7 +2128,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.4.0"
-source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition#980b39bcca5b3327aaef6c8d73577d9381bfa899"
+source = "git+https://github.com/axiom-crypto/halo2-lib.git?branch=community-edition#262f5c5e074fbbb88c9decf5516568c12413ab94"
 dependencies = [
  "halo2-base",
  "itertools 0.10.5",
@@ -5635,6 +5636,26 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "zerocopy"
+version = "0.7.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cd369a67c0edfef15010f980c3cbe45d7f651deac2cd67ce097cd801de16557"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.7.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2f140bda219a26ccc0cdb03dba58af72590c53b22642577d88a927bc5c87d6b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.38",
+]
 
 [[package]]
 name = "zeroize"

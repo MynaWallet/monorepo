@@ -66,3 +66,6 @@ default = ["halo2-axiom", "display"]
 display = ["halo2-base/display"]
 halo2-pse = ["halo2-base/halo2-pse"]
 halo2-axiom = ["halo2-base/halo2-axiom"]
+
+[workspace]
+resolver = "2"

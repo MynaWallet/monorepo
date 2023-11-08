@@ -53,12 +53,13 @@ pub fn read_citizen_cert(cert_path: &str) -> (BigUint, BigUint, BigUint) {
 
     // Extract the TBS (To-Be-Signed) data from the certificate
     let tbs_bytes = cert.tbs_certificate.as_ref();
+    dbg!(tbs_bytes.len());
     let tbs_biguint = BigUint::from_bytes_le(tbs_bytes);
     // println!("TBS (To-Be-Signed): {:x?}", tbs);
 
     // Extract the signature from cert 3
     let nation_sig_bytes = &cert.signature_value;
-    let nation_sig_biguint = BigUint::from_bytes_le(&nation_sig_bytes.data);
+    let nation_sig_biguint = BigUint::from_bytes_be(&nation_sig_bytes.data);
 
     let citizen_pubkey_bytes = cert.tbs_certificate.subject_pki.subject_public_key.as_ref();
     let citizen_pubkey_biguint = BigUint::from_bytes_le(&citizen_pubkey_bytes[9..256 + 9]);

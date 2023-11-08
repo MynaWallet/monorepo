@@ -95,10 +95,22 @@ fn main() {
             let nation_pubkey = read_nation_cert(&issuer_cert_path);
             let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
 
+            let mut builder = BaseCircuitBuilder::new(false);
+            builder.set_k(k as usize);
+            builder.set_lookup_bits(circuit::LOOKUP_BITS);
+            builder.set_instance_columns(1);
+            let range_chip = builder.range_chip();
+            let ctx = builder.main(0);
+
             let public = circuit::PublicInput { nation_pubkey };
             let private =
                 circuit::PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig, password: Fr::from(password) };
-            let builder = circuit::proof_of_japanese_residence(public, private);
+            dbg!(tbs_cert.to_bytes_le().len());
+            let outputs = circuit::proof_of_japanese_residence(ctx, range_chip, public, private);
+
+            builder.assigned_instances[0].extend(outputs);
+            let circuit_params = builder.calculate_params(None);
+            builder = builder.use_params(circuit_params);
 
             if Path::new(&pk_path).exists() {
                 match remove_file(&pk_path) {
@@ -115,10 +127,21 @@ fn main() {
             let nation_pubkey = read_nation_cert(&issuer_cert_path);
             let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
 
+            let mut builder = BaseCircuitBuilder::new(false);
+            builder.set_k(k as usize);
+            builder.set_lookup_bits(circuit::LOOKUP_BITS);
+            builder.set_instance_columns(1);
+            let range_chip = builder.range_chip();
+            let ctx = builder.main(0);
+
             let public = circuit::PublicInput { nation_pubkey };
             let private =
                 circuit::PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig, password: Fr::from(password) };
-            let builder = circuit::proof_of_japanese_residence(public, private);
+            let outputs = circuit::proof_of_japanese_residence(ctx, range_chip, public, private);
+
+            builder.assigned_instances[0].extend(outputs);
+            let circuit_params = builder.calculate_params(None);
+            builder = builder.use_params(circuit_params);
 
             if Path::new(&proof_path).exists() {
                 match remove_file(&proof_path) {
