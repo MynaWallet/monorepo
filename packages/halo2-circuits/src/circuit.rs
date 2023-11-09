@@ -1,11 +1,14 @@
 use halo2_base::{
-    gates::{circuit::builder::BaseCircuitBuilder, GateInstructions, RangeChip, RangeInstructions},
+    gates::{
+        circuit::{builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig},
+        GateInstructions, RangeChip, RangeInstructions,
+    },
     halo2_proofs::{
         arithmetic::Field,
-        halo2curves::{
-            bn256::Fr,
-            ff::{PrimeField, PrimeFieldBits},
-        },
+        circuit::{Layouter, SimpleFloorPlanner},
+        dev::MockProver,
+        halo2curves::bn256::Fr,
+        plonk::{Circuit, ConstraintSystem, Error},
     },
     poseidon::hasher::{spec::OptimizedPoseidonSpec, PoseidonHasher},
     AssignedValue, Context, QuantumCell,
@@ -39,6 +42,7 @@ pub const LOOKUP_BITS: usize = 8;
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
+const K: usize = 22;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
 const MAX_TBS_CERT_BITS: usize = 1 << 15;
@@ -74,6 +78,50 @@ pub fn bytes_to_64s(
     // bug
     let biguint_chip = BigUintConfig::construct(range_chip, 64);
     bytes_to_biguint(ctx, biguint_chip, src).limbs().to_vec()
+}
+
+#[derive(Debug, Clone)]
+struct Config {
+    halo2base: BaseConfig<Fr>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProofOfJapaneseResidence {
+    halo2base: BaseCircuitBuilder<Fr>,
+}
+
+impl Circuit<Fr> for ProofOfJapaneseResidence {
+    type Config = Config;
+    type Params = BaseCircuitParams;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self::default()
+    }
+
+    fn params(&self) -> Self::Params {
+        self.halo2base.config_params.clone()
+    }
+
+    fn configure_with_params(meta: &mut ConstraintSystem<Fr>, params: BaseCircuitParams) -> Self::Config {
+        Self::Config { halo2base: BaseConfig::configure(meta, params) }
+    }
+
+    fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
+        unreachable!("halo2-base says I must not call configure");
+    }
+
+    fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
+        self.halo2base.synthesize(config.halo2base, layouter)?;
+
+        // TODO: SHA256
+
+        Ok(())
+    }
+}
+
+impl ProofOfJapaneseResidence {
+    fn assign_halo2base() {}
 }
 
 pub fn proof_of_japanese_residence(
@@ -209,18 +257,38 @@ mod tests {
 
     #[test]
     fn mock() {
+        let mut builder = BaseCircuitBuilder::default();
+        builder.set_k(K);
+        builder.set_lookup_bits(LOOKUP_BITS);
+        builder.set_instance_columns(1);
+        let range_chip = builder.range_chip().clone();
+
         let nation_pubkey = read_nation_cert("./certs/ca_cert.pem");
         let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert("./certs/myna_cert.pem");
+        let public_input = PublicInput { nation_pubkey: nation_pubkey.clone() };
+        let private_input =
+            PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig: nation_sig.clone(), password: Fr::from(123) };
+        let public_outputs =
+            proof_of_japanese_residence(builder.pool(0).main(), range_chip, public_input, private_input);
 
-        base_test().k(22).run(|ctx, range_chip| {
-            let public = PublicInput { nation_pubkey: nation_pubkey.clone() };
-            let private = PrivateInput {
-                tbs_cert: tbs_cert.to_bytes_le(),
-                nation_sig: nation_sig.clone(),
-                password: Fr::from(123),
-            };
+        builder.assigned_instances[0].extend(public_outputs);
+        // AUDIT: Is K enough to achieve zero knowledge?
+        builder.calculate_params(Some(9));
 
-            let outputs = proof_of_japanese_residence(ctx, range_chip.clone(), public, private);
-        });
+        let circuit = ProofOfJapaneseResidence { halo2base: builder };
+        dbg!(circuit.params());
+
+        MockProver::run(
+            K as u32,
+            &circuit,
+            circuit
+                .halo2base
+                .assigned_instances
+                .iter()
+                .map(|public_column| public_column.into_iter().map(|public_cell| public_cell.value().clone()).collect())
+                .collect(),
+        )
+        .expect("The circuit generation failed")
+        .assert_satisfied();
     }
 }
