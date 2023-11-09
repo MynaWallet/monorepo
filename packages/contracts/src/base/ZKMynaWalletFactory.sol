@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/utils/Create2.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {ZKMynaWallet} from "./ZKMynaWallet.sol";
-import {IMynaWalletVerifier} from "@interfaces/IMynaWalletVerifier.sol";
+import { IMynaGovSigVerifier, IMynaUserSigVerifier } from "@interfaces/IMynaWalletVerifier.sol";
 
 /**
  * Factory contract for MynaWallet.
