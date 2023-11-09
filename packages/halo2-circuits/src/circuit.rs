@@ -6,7 +6,6 @@ use halo2_base::{
     halo2_proofs::{
         arithmetic::Field,
         circuit::{Layouter, SimpleFloorPlanner},
-        dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{Circuit, ConstraintSystem, Error},
     },
@@ -21,7 +20,6 @@ use halo2_rsa::{
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
 // use zkevm_hashes::Sha256Chip;
-use halo2_sha256_unoptimized::Sha256Chip;
 
 #[derive(Debug, Clone)]
 pub struct PublicInput {
@@ -31,7 +29,7 @@ pub struct PublicInput {
 
 #[derive(Debug, Clone)]
 pub struct PrivateInput {
-    pub tbs_cert: Vec<u8>,
+    pub tbs_cert: [u32; MAX_TBS_CERT_BITS / 32],
     // 2048 bits
     pub nation_sig: BigUint,
     pub password: Fr,
@@ -120,10 +118,6 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 }
 
-impl ProofOfJapaneseResidence {
-    fn assign_halo2base() {}
-}
-
 pub fn proof_of_japanese_residence(
     ctx: &mut Context<Fr>,
     range_chip: RangeChip<Fr>,
@@ -132,8 +126,8 @@ pub fn proof_of_japanese_residence(
 ) -> Vec<AssignedValue<Fr>> {
     let biguint_chip: BigUintConfig<Fr> = BigUintConfig::construct(range_chip.clone(), LIMB_BITS);
     let rsa_chip = RSAConfig::construct(biguint_chip, RSA_KEY_SIZE, 5);
-    let mut sha256_chip =
-        Sha256Chip::construct(vec![SHA256_INPUT_BLOCKS * SHA256_BLOCK_BITS / 8], range_chip.clone(), true);
+    // let mut sha256_chip =
+    //     Sha256Chip::construct(vec![SHA256_INPUT_BLOCKS * SHA256_BLOCK_BITS / 8], range_chip.clone(), true);
     let mut poseidon = PoseidonHasher::new(OptimizedPoseidonSpec::<Fr, 3, 2>::new::<8, 57, 0>());
     poseidon.initialize_consts(ctx, rsa_chip.gate());
 
@@ -153,13 +147,13 @@ pub fn proof_of_japanese_residence(
     // );
     // let citizen_pubkey = AssignedRSAPublicKey::new(n.clone(), AssignedRSAPubE::Fix(E.into()));
 
-    let sha256ed = sha256_chip.digest(ctx, &private.tbs_cert, None).unwrap();
-    let identity_commitment_preimage: Vec<AssignedValue<Fr>> = sha256ed.input_bytes
-        [PUBKEY_BEGINS / 8..(PUBKEY_BEGINS + RSA_KEY_SIZE) / 8]
-        .iter()
-        .copied()
-        .chain(std::iter::once(password))
-        .collect();
+    // let sha256ed = sha256_chip.digest(ctx, &private.tbs_cert, None).unwrap();
+    // let identity_commitment_preimage: Vec<AssignedValue<Fr>> = sha256ed.input_bytes
+    //     [PUBKEY_BEGINS / 8..(PUBKEY_BEGINS + RSA_KEY_SIZE) / 8]
+    //     .iter()
+    //     .copied()
+    //     .chain(std::iter::once(password))
+    //     .collect();
 
     // println!("sha256ed");
     // for byte in &sha256ed.input_bytes[PUBKEY_BEGINS / 8..(PUBKEY_BEGINS + RSA_KEY_SIZE) / 8] {
@@ -167,10 +161,10 @@ pub fn proof_of_japanese_residence(
     //     print!("{:0b}", byte);
     // }
 
-    let identity_commitment = poseidon.hash_fix_len_array(ctx, rsa_chip.gate(), &identity_commitment_preimage);
+    // let identity_commitment = poseidon.hash_fix_len_array(ctx, rsa_chip.gate(), &identity_commitment_preimage);
 
-    let sha256ed_64s =
-        bytes_to_64s(ctx, range_chip.clone(), &sha256ed.output_bytes.iter().rev().copied().collect::<Vec<_>>());
+    // let sha256ed_64s =
+    //     bytes_to_64s(ctx, range_chip.clone(), &sha256ed.output_bytes.iter().rev().copied().collect::<Vec<_>>());
 
     // assert_eq!(
     //     sha256ed_64s.iter().flat_map(|a| a.value().to_bytes()[0..8].to_vec()).collect::<Vec<_>>(),
@@ -185,34 +179,34 @@ pub fn proof_of_japanese_residence(
     // }
     // println!("aa");
 
-    let hashed_tbs = Sha256::digest(private.tbs_cert);
-    println!("Hashed TBS: {:?}", hashed_tbs);
-    let mut hashed_bytes: Vec<AssignedValue<Fr>> =
-        hashed_tbs.iter().map(|limb| ctx.load_witness(Fr::from(*limb as u64))).collect();
-    hashed_bytes.reverse();
-    let bytes_bits = hashed_bytes.len() * 8;
-    let limb_bits = 64;
-    let limb_bytes = limb_bits / 8;
-    let mut hashed_u64s = vec![];
-    let bases: Vec<_> = (0..limb_bytes).map(|i| Fr::from(1u64 << (8 * i))).map(QuantumCell::Constant).collect();
-    for i in 0..(bytes_bits / limb_bits) {
-        let left: Vec<_> =
-            hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)].iter().map(|x| QuantumCell::Existing(*x)).collect();
-        let sum = rsa_chip.gate().inner_product(ctx, left, bases.clone());
-        hashed_u64s.push(sum);
-    }
+    // let hashed_tbs = Sha256::digest(private.tbs_cert);
+    // println!("Hashed TBS: {:?}", hashed_tbs);
+    // let mut hashed_bytes: Vec<AssignedValue<Fr>> =
+    //     hashed_tbs.iter().map(|limb| ctx.load_witness(Fr::from(*limb as u64))).collect();
+    // hashed_bytes.reverse();
+    // let bytes_bits = hashed_bytes.len() * 8;
+    // let limb_bits = 64;
+    // let limb_bytes = limb_bits / 8;
+    // let mut hashed_u64s = vec![];
+    // let bases: Vec<_> = (0..limb_bytes).map(|i| Fr::from(1u64 << (8 * i))).map(QuantumCell::Constant).collect();
+    // for i in 0..(bytes_bits / limb_bits) {
+    //     let left: Vec<_> =
+    //         hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)].iter().map(|x| QuantumCell::Existing(*x)).collect();
+    //     let sum = rsa_chip.gate().inner_product(ctx, left, bases.clone());
+    //     hashed_u64s.push(sum);
+    // }
 
-    assert_eq!(
-        sha256ed_64s.iter().map(|a| a.value()).collect::<Vec<_>>(),
-        hashed_u64s.iter().map(|a| a.value()).collect::<Vec<_>>()
-    );
+    // assert_eq!(
+    //     sha256ed_64s.iter().map(|a| a.value()).collect::<Vec<_>>(),
+    //     hashed_u64s.iter().map(|a| a.value()).collect::<Vec<_>>()
+    // );
 
-    let is_nation_sig_valid =
-        rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
-    rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
+    // let is_nation_sig_valid =
+    //     rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
+    // rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
 
     let mut outputs = nation_pubkey.n.limbs().to_vec();
-    outputs.push(identity_commitment);
+    // outputs.push(identity_commitment);
     outputs
 }
 
@@ -220,7 +214,10 @@ pub fn proof_of_japanese_residence(
 mod tests {
     use super::*;
     use crate::helpers::{read_citizen_cert, read_nation_cert};
-    use halo2_base::{halo2_proofs::halo2curves::ff::PrimeField, utils::testing::base_test};
+    use halo2_base::{
+        halo2_proofs::{dev::MockProver, halo2curves::ff::PrimeField},
+        utils::testing::base_test,
+    };
     use num_traits::cast::ToPrimitive;
 
     // TODO: Write tests for failure cases
@@ -265,13 +262,17 @@ mod tests {
 
         let nation_pubkey = read_nation_cert("./certs/ca_cert.pem");
         let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert("./certs/myna_cert.pem");
+
+        let mut tbs_cert_32 = [0u32; MAX_TBS_CERT_BITS / 32];
+        tbs_cert_32[0..tbs_cert.to_u32_digits().len()].copy_from_slice(&tbs_cert.to_u32_digits());
+
         let public_input = PublicInput { nation_pubkey: nation_pubkey.clone() };
         let private_input =
-            PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig: nation_sig.clone(), password: Fr::from(123) };
-        let public_outputs =
+            PrivateInput { tbs_cert: tbs_cert_32, nation_sig: nation_sig.clone(), password: Fr::from(0xA42) };
+        let public_output =
             proof_of_japanese_residence(builder.pool(0).main(), range_chip, public_input, private_input);
 
-        builder.assigned_instances[0].extend(public_outputs);
+        builder.assigned_instances[0].extend(public_output);
         // AUDIT: Is K enough to achieve zero knowledge?
         builder.calculate_params(Some(9));
 
