@@ -18,8 +18,8 @@ contract ZKMynaWalletFactory {
      * @dev Cusntuctor is only used when factory is deployed and the facotry holds wallet implementation address which is immutable
      * @param _entryPoint EntryPoint contract address that can operate this contract
      */
-    constructor(IEntryPoint _entryPoint, IMynaWalletVerifier newVerifier) {
-        accountImplementation = new ZKMynaWallet(_entryPoint, newVerifier);
+    constructor(IEntryPoint _entryPoint, IMynaGovSigVerifier newGovSigVerifier, IMynaUserSigVerifier newUserSigVerifier) {
+        accountImplementation = new ZKMynaWallet(_entryPoint, newGovSigVerifier, newUserSigVerifier);
     }
 
     /**

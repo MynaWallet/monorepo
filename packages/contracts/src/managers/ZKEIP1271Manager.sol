@@ -5,9 +5,9 @@ import {_parseValidationData, ValidationData} from "@account-abstraction/contrac
 import "@libraries/ZKAccountStorage.sol";
 import "@libraries/Errors.sol";
 import "@auth/ZKAuth.sol";
-import "@managers/ZKOwnerManager.sol";
+import "@managers/ZKStorageManager.sol";
 
-abstract contract ZKEIP1271Manager is ZKAuth, ZKOwnerManager {
+abstract contract ZKEIP1271Manager is ZKAuth, ZKStorageManager {
     /// @notice EIP1271: Standard Signature Validation Method for Contracts
     /// https://eips.ethereum.org/EIPS/eip-1271
     bytes4 internal constant _MAGICVALUE = 0x1626ba7e;
