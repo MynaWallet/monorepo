@@ -23,7 +23,7 @@ template CalculateHash(k) {
 }
 
 template VerifyInclusion() {
-    signal input tbsCert[1586];
+    signal input tbsCert[1600];
     signal input modulus[17];
 
     component num2Bits0[256];
@@ -65,7 +65,7 @@ template VerifyInclusion() {
 }
 
 template HashTbs() {
-    signal input tbsCert[1586];
+    signal input tbsCert[1600];
     signal output hashedTbsInNum[3];
 
     component num2Bits[1306];
@@ -113,7 +113,7 @@ template MynaVerifyGovSig(n, k) {
     signal input modulus[k]; // rsa public key, verified with smart contract. split up into k parts of n bits each.
     signal input govModulus[k];
     signal input govSignature[k];
-    signal input tbsCert[1586];
+    signal input tbsCert[1600];
 
     var messageLength = (256 + n) \ n;
 

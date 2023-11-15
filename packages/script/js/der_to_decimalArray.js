@@ -29,8 +29,9 @@ while (outputLen < 1600) {
     outputArray.push(0);
     outputLen = outputArray.length;
 }
+console.log(outputArray);
 
-const data = JSON.stringify(outputArray);
-fs.writeFile(OUTPUT_PATH, data, (err) => {
- if (err) throw err;
-});
+// const data = JSON.stringify(outputArray);
+// fs.writeFile(OUTPUT_PATH, data, (err) => {
+//  if (err) throw err;
+// });

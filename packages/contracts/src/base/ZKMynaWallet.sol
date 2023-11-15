@@ -144,19 +144,19 @@ contract ZKMynaWallet is
     // TODO: Check modulus preimage
     function validateGovSignature(bytes32[43] memory proof) 
         public
-        returns (uint256 validationData)
+        onlySelf()
     {
         (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[SIGNALS_NUM_FOR_GOV_SIG] memory _pubSignals) =
             _splitToGovSigProof(proof);
 
         try govSigVerifier.verifyProof(_pA, _pB, _pC, _pubSignals) returns (bool valid) {
-            if (!valid) {
-                return 1;
-            } else {
+            if (valid) {
                 _setVerified();
+            } else {
+                revert();
             }
         } catch {
-            return 1;
+            revert();
         }
     }
 

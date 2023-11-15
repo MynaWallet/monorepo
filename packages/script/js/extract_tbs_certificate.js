@@ -6,6 +6,7 @@ const PATH = join(__dirname, '../../certs/myna_cert.pem')
 
 // Read the PEM file
 const pem = readFileSync(PATH, 'utf8')
+console.log(typeof(pem));
 
 // Remove the '-----BEGIN CERTIFICATE-----' and '-----END CERTIFICATE-----' lines
 const base64String = pem
@@ -14,6 +15,7 @@ const base64String = pem
     .replace(/\n/g, '')
 
 const der = Buffer.from(base64String, 'base64')
+console.log(typeof(der));
 
 // certificate consists of
 // - tbsCertificate 人によって長さが違う
@@ -25,4 +27,4 @@ const newSize = der.length - cutSize
 
 // 先頭4バイトは SEQUENCE の長さ
 const tbsCertificate = der.slice(4, newSize)
-console.log(tbsCertificate.toString('hex'))
+// console.log(tbsCertificate.toString('hex'))
