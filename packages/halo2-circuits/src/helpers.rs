@@ -6,7 +6,7 @@ use halo2_base::{
     QuantumCell::{Constant, Existing},
 };
 use halo2_rsa::{BigUintConfig, BigUintInstructions, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
-use snark_verifier_sdk::{gen_pk, halo2::gen_snark_shplonk, Snark};
+// use snark_verifir_sdk::{gen_pk, halo2::gen_snark_shplonk, Snark};
 
 use itertools::Itertools;
 use num_bigint::BigUint;

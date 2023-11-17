@@ -5,12 +5,12 @@ use halo2_base::{
     utils::{fs::gen_srs, BigPrimeField},
 };
 use halo2_circuits::{circuit, helpers::*};
-use snark_verifier_sdk::{
-    evm::{gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
-    gen_pk,
-    halo2::gen_snark_shplonk,
-    read_pk, CircuitExt,
-};
+// use snark_verifier_sdk::{
+//     evm::{gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
+//     gen_pk,
+//     halo2::gen_snark_shplonk,
+//     read_pk, CircuitExt,
+// };
 use std::{env, fs::remove_file, path::Path};
 
 #[derive(Parser, Debug, Clone)]

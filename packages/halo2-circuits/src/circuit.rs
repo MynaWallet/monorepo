@@ -7,7 +7,7 @@ use halo2_base::{
         arithmetic::Field,
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::bn256::Fr,
-        plonk::{Circuit, ConstraintSystem, Error},
+        plonk::{Assignment, Circuit, ConstraintSystem, Error},
     },
     poseidon::hasher::{spec::OptimizedPoseidonSpec, PoseidonHasher},
     AssignedValue, Context, QuantumCell,
@@ -18,18 +18,21 @@ use halo2_rsa::{
     RSASignature,
 };
 use num_bigint::BigUint;
-use sha2::{Digest, Sha256};
+use num_traits::One;
+use sha2::Digest;
+use zkevm_hashes::sha256::vanilla::columns::Sha256CircuitConfig;
 // use zkevm_hashes::Sha256Chip;
 
 #[derive(Debug, Clone)]
 pub struct PublicInput {
     // 2048 bits
     pub nation_pubkey: BigUint,
+    // little endian
+    pub sha256: [Fr; 2],
 }
 
 #[derive(Debug, Clone)]
 pub struct PrivateInput {
-    pub tbs_cert: [u32; MAX_TBS_CERT_BITS / 32],
     // 2048 bits
     pub nation_sig: BigUint,
     pub password: Fr,
@@ -43,8 +46,7 @@ const E: usize = 65537;
 const K: usize = 22;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
-const MAX_TBS_CERT_BITS: usize = 1 << 15;
-const SHA256_INPUT_BLOCKS: usize = MAX_TBS_CERT_BITS / SHA256_BLOCK_BITS; // the remainder must be 0
+const TBS_CERT_MAX_BITS: usize = 1 << 12;
 
 pub fn bytes_to_biguint(
     ctx: &mut Context<Fr>,
@@ -78,14 +80,60 @@ pub fn bytes_to_64s(
     bytes_to_biguint(ctx, biguint_chip, src).limbs().to_vec()
 }
 
+pub fn biguint_to_fr(src: BigUint) -> Fr {
+    let mut buf = [0; 32];
+    buf[0..src.to_bytes_le().len()].copy_from_slice(&src.to_bytes_le());
+    Fr::from_bytes(&buf).expect("a BigUint was too big to fit in a Fr")
+}
+
+pub fn split_each_limb(
+    ctx: &mut Context<Fr>,
+    range_chip: &RangeChip<Fr>,
+    big_limbs: &[AssignedValue<Fr>],
+    big_limb_bits: usize,
+    small_limb_bits: usize,
+) -> Vec<AssignedValue<Fr>> {
+    assert_eq!(0, big_limb_bits % small_limb_bits);
+    assert!(small_limb_bits < big_limb_bits);
+
+    let limb_bases = (0..).map(|x| QuantumCell::Constant(biguint_to_fr(BigUint::one() << (x * small_limb_bits))));
+    let mut small_limbs: Vec<AssignedValue<Fr>> = Vec::new();
+    for big_limb in big_limbs {
+        let mut offset = 0;
+        while offset < big_limb_bits {
+            let small_limb =
+                (BigUint::from_bytes_le(&big_limb.value().to_bytes()) >> offset) % (BigUint::one() << small_limb_bits);
+            let small_limb = ctx.load_witness(biguint_to_fr(small_limb));
+            range_chip.range_check(ctx, small_limb, small_limb_bits);
+            small_limbs.push(small_limb);
+            offset += small_limb_bits;
+        }
+
+        let small_to_big = range_chip.gate().inner_product(
+            ctx,
+            small_limbs
+                .iter()
+                .skip(small_limbs.len() - big_limb_bits / small_limb_bits)
+                .copied()
+                .map(QuantumCell::Existing),
+            limb_bases.clone(),
+        );
+        ctx.constrain_equal(big_limb, &small_to_big);
+    }
+
+    small_limbs
+}
+
 #[derive(Debug, Clone)]
 struct Config {
     halo2base: BaseConfig<Fr>,
+    sha256: Sha256CircuitConfig<Fr>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct ProofOfJapaneseResidence {
     halo2base: BaseCircuitBuilder<Fr>,
+    tbs_cert: Vec<u8>,
 }
 
 impl Circuit<Fr> for ProofOfJapaneseResidence {
@@ -94,7 +142,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self::default()
+        unreachable!()
     }
 
     fn params(&self) -> Self::Params {
@@ -102,7 +150,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn configure_with_params(meta: &mut ConstraintSystem<Fr>, params: BaseCircuitParams) -> Self::Config {
-        Self::Config { halo2base: BaseConfig::configure(meta, params) }
+        Self::Config { halo2base: BaseConfig::configure(meta, params), sha256: Sha256CircuitConfig::new(meta) }
     }
 
     fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
@@ -110,9 +158,41 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
-        self.halo2base.synthesize(config.halo2base, layouter)?;
+        let mut assigned_blocks = Vec::new();
+        layouter.assign_region(
+            || "SHA256",
+            |mut region| {
+                assigned_blocks = config.sha256.multi_sha256(
+                    &mut region,
+                    vec![self.tbs_cert.clone()],
+                    None,
+                    // TODO: We should specify here the number of SHA256 blocks thats necessary to fit the input in
+                    // but when I do so zkevm-hashes panics. Why?? Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS)
+                );
+                Ok(())
+            },
+        )?;
 
-        // TODO: SHA256
+        let mut final_block = None;
+        for block in assigned_blocks.iter() {
+            block.is_final().value().map(|is_final| {
+                if Fr::zero() < is_final.evaluate() {
+                    final_block = Some(block);
+                }
+            });
+
+            if let Some(_) = final_block {
+                break;
+            }
+        }
+        let final_block = final_block.expect("unreachable");
+        dbg!(final_block.output());
+
+        // TODO: Hide these
+        layouter.constrain_instance(final_block.output().lo().cell(), config.halo2base.instance[0], 0);
+        layouter.constrain_instance(final_block.output().hi().cell(), config.halo2base.instance[0], 1);
+
+        self.halo2base.synthesize(config.halo2base, layouter).unwrap();
 
         Ok(())
     }
@@ -130,6 +210,9 @@ pub fn proof_of_japanese_residence(
     //     Sha256Chip::construct(vec![SHA256_INPUT_BLOCKS * SHA256_BLOCK_BITS / 8], range_chip.clone(), true);
     let mut poseidon = PoseidonHasher::new(OptimizedPoseidonSpec::<Fr, 3, 2>::new::<8, 57, 0>());
     poseidon.initialize_consts(ctx, rsa_chip.gate());
+
+    let sha256lo = ctx.load_witness(public.sha256[0]);
+    let sha256hi = ctx.load_witness(public.sha256[1]);
 
     // load public inputs
     let nation_pubkey =
@@ -201,12 +284,14 @@ pub fn proof_of_japanese_residence(
     //     hashed_u64s.iter().map(|a| a.value()).collect::<Vec<_>>()
     // );
 
-    // let is_nation_sig_valid =
-    //     rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
-    // rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
+    let sha256ed_64s = split_each_limb(ctx, rsa_chip.range(), &[sha256lo, sha256hi], 128, 64);
+    let is_nation_sig_valid =
+        rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
+    rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
 
-    let mut outputs = nation_pubkey.n.limbs().to_vec();
+    let mut outputs = vec![sha256lo, sha256hi];
     // outputs.push(identity_commitment);
+    outputs.extend(nation_pubkey.n.limbs().to_vec());
     outputs
 }
 
@@ -219,6 +304,7 @@ mod tests {
         utils::testing::base_test,
     };
     use num_traits::cast::ToPrimitive;
+    use sha2::Sha256;
 
     // TODO: Write tests for failure cases
     // #[test]
@@ -263,21 +349,25 @@ mod tests {
         let nation_pubkey = read_nation_cert("./certs/ca_cert.pem");
         let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert("./certs/myna_cert.pem");
 
-        let mut tbs_cert_32 = [0u32; MAX_TBS_CERT_BITS / 32];
-        tbs_cert_32[0..tbs_cert.to_u32_digits().len()].copy_from_slice(&tbs_cert.to_u32_digits());
+        let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
+        sha256ed.reverse();
+        let mut buf = [0; 32];
+        buf[0..16].copy_from_slice(&sha256ed[0..16]);
+        let sha256lo = Fr::from_bytes(&buf).unwrap();
+        buf[0..16].copy_from_slice(&sha256ed[16..32]);
+        let sha256hi = Fr::from_bytes(&buf).unwrap();
 
-        let public_input = PublicInput { nation_pubkey: nation_pubkey.clone() };
-        let private_input =
-            PrivateInput { tbs_cert: tbs_cert_32, nation_sig: nation_sig.clone(), password: Fr::from(0xA42) };
+        let public_input = PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey: nation_pubkey.clone() };
+        let private_input = PrivateInput { nation_sig: nation_sig.clone(), password: Fr::from(0xA42) };
         let public_output =
             proof_of_japanese_residence(builder.pool(0).main(), range_chip, public_input, private_input);
 
+        dbg!(&public_output);
         builder.assigned_instances[0].extend(public_output);
         // AUDIT: Is K enough to achieve zero knowledge?
         builder.calculate_params(Some(9));
 
-        let circuit = ProofOfJapaneseResidence { halo2base: builder };
-        dbg!(circuit.params());
+        let circuit = ProofOfJapaneseResidence { halo2base: builder, tbs_cert: tbs_cert.to_bytes_le() };
 
         MockProver::run(
             K as u32,
