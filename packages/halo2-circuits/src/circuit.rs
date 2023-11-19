@@ -39,11 +39,11 @@ pub struct PrivateInput {
 }
 
 // halo2-sha256-unoptimized takes inputs byte by byte so I guess 8 is optimimal
-pub const LOOKUP_BITS: usize = 8;
+pub const LOOKUP_BITS: usize = 16;
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-const K: usize = 22;
+pub const K: usize = 18;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
 const TBS_CERT_MAX_BITS: usize = 1 << 12;
@@ -125,15 +125,15 @@ pub fn split_each_limb(
 }
 
 #[derive(Debug, Clone)]
-struct Config {
+pub struct Config {
     halo2base: BaseConfig<Fr>,
     sha256: Sha256CircuitConfig<Fr>,
 }
 
 #[derive(Debug, Clone)]
-struct ProofOfJapaneseResidence {
-    halo2base: BaseCircuitBuilder<Fr>,
-    tbs_cert: Vec<u8>,
+pub struct ProofOfJapaneseResidence {
+    pub halo2base: BaseCircuitBuilder<Fr>,
+    pub tbs_cert: Vec<u8>,
 }
 
 impl Circuit<Fr> for ProofOfJapaneseResidence {
@@ -173,20 +173,23 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
             },
         )?;
 
-        let mut final_block = None;
-        for block in assigned_blocks.iter() {
-            block.is_final().value().map(|is_final| {
-                if Fr::zero() < is_final.evaluate() {
-                    final_block = Some(block);
-                }
-            });
+        // let mut final_block = None;
+        // for block in assigned_blocks.iter() {
+        //     block.is_final().value().map(|is_final| {
+        //         if Fr::zero() < is_final.evaluate() {
+        //             final_block = Some(block);
+        //         }
+        //     });
 
-            if let Some(_) = final_block {
-                break;
-            }
-        }
-        let final_block = final_block.expect("unreachable");
-        dbg!(final_block.output());
+        //     if let Some(_) = final_block {
+        //         break;
+        //     }
+        // }
+        // let final_block = final_block.expect("zkevm-hashes failed to generate a SHA256 hash");
+        // dbg!(final_block.output());
+
+        // TODO: Support longer inputs;
+        let final_block = &assigned_blocks[20];
 
         // TODO: Hide these
         layouter.constrain_instance(final_block.output().lo().cell(), config.halo2base.instance[0], 0);
