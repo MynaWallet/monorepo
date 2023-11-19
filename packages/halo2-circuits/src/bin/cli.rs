@@ -8,7 +8,7 @@ use halo2_base::{
             commitment::Params,
             kzg::{
                 commitment::{KZGCommitmentScheme, ParamsKZG},
-                multiopen::{ProverGWC, VerifierGWC},
+                multiopen::{ProverSHPLONK, VerifierSHPLONK},
                 strategy::SingleStrategy,
             },
         },
@@ -17,23 +17,24 @@ use halo2_base::{
     },
     utils::{fs::gen_srs, BigPrimeField},
 };
-use halo2_circuits::{circuit, helpers::*};
+use halo2_circuits::{
+    circuit::{self, ProofOfJapaneseResidence},
+    helpers::*,
+};
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
-use std::{
-    fmt::Binary,
-    fs::File,
-    io::{Read, Write},
-    path::PathBuf,
+use snark_verifier_sdk::{
+    evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
+    snark_verifier::system::halo2::transcript::evm::EvmTranscript,
+    CircuitExt,
 };
-// use snark_verifier_sdk::
-// use snark_verifier_sdk::{
-//     evm::{gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
-//     gen_pk,
-//     halo2::gen_snark_shplonk,
-//     read_pk, CircuitExt,
-// };
-use std::{env, fs::remove_file, path::Path};
+use std::{
+    env,
+    fmt::Binary,
+    fs::{remove_file, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -114,11 +115,8 @@ enum Commands {
         #[arg(short, long, default_value = "./build/trusted_setup")]
         trusted_setup_path: String,
         /// proving key path. output
-        #[arg(long, default_value = "./build/vk")]
-        vk_path: String,
-        /// proof path. output
-        #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
-        proof_path: String,
+        #[arg(long, default_value = "./build/pk")]
+        pk_path: String,
         // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
@@ -202,7 +200,7 @@ fn main() {
             let mut proof = Blake2bWrite::<_, _, Challenge255<_>>::init(proof_file);
             create_proof::<
                 KZGCommitmentScheme<Bn256>,
-                ProverGWC<'_, Bn256>,
+                ProverSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
                 _,
                 Blake2bWrite<File, G1Affine, Challenge255<_>>,
@@ -245,7 +243,7 @@ fn main() {
 
             let result = verify_proof::<
                 KZGCommitmentScheme<Bn256>,
-                VerifierGWC<'_, Bn256>,
+                VerifierSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
                 Blake2bRead<&File, G1Affine, Challenge255<G1Affine>>,
                 SingleStrategy<'_, Bn256>,
@@ -254,55 +252,42 @@ fn main() {
             );
             assert!(result.is_ok(), "{:?}", result)
         }
-        Commands::GenerateSolidity {
-            trusted_setup_path,
-            vk_path,
-            proof_path,
-            verify_cert_path,
-            issuer_cert_path,
-            password,
-        } => {
-            // let nation_pubkey = read_nation_cert(&issuer_cert_path);
-            // let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(&verify_cert_path);
+        Commands::GenerateSolidity { trusted_setup_path, pk_path, verify_cert_path, issuer_cert_path, password } => {
+            let circuit = circuit::ProofOfJapaneseResidence::new(
+                issuer_cert_path.into(),
+                verify_cert_path.into(),
+                password.into(),
+            );
 
-            // let mut builder = BaseCircuitBuilder::new(false);
-            // builder.set_k(k as usize);
-            // builder.set_lookup_bits(circuit::LOOKUP_BITS);
-            // builder.set_instance_columns(1);
-            // let range_chip = builder.range_chip();
-            // let ctx = builder.main(0);
+            let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+            let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
+                .expect("The trusted setup is corrupted");
 
-            // let public = circuit::PublicInput { nation_pubkey };
-            // let private =
-            //     circuit::PrivateInput { tbs_cert: tbs_cert.to_bytes_le(), nation_sig, password: Fr::from(password) };
-            // let outputs = circuit::proof_of_japanese_residence(ctx, range_chip, public, private);
+            let mut pk_file = File::open(pk_path).expect("vk not found. Run generate-keys first.");
+            let pk = ProvingKey::<G1Affine>::read::<_, circuit::ProofOfJapaneseResidence>(
+                &mut pk_file,
+                SerdeFormat::RawBytes,
+                circuit.params(),
+            )
+            .unwrap();
 
-            // builder.assigned_instances[0].extend(outputs);
-            // let circuit_params = builder.calculate_params(None);
-            // builder = builder.use_params(circuit_params);
+            let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit.clone(), circuit.halo2base.instances());
+            let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
+                &trusted_setup,
+                &pk.get_vk(),
+                circuit.halo2base.num_instance(),
+                Some(Path::new("./build/VerifyRsa.sol")),
+            );
 
-            // env::set_var("PARAMS_DIR", params_path);
-            // let trusted_setup = gen_srs(k);
-            // let pk = read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
+            println!("Size of the contract: {} bytes", deployment_code.len());
+            println!("Deploying contract...");
 
-            // let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
-            //     &trusted_setup,
-            //     pk.get_vk(),
-            //     builder.num_instance(),
-            //     Some(Path::new("./build/VerifyRsa.sol")),
-            // );
+            evm_verify(deployment_code, circuit.halo2base.instances(), proof.clone());
 
-            // let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, builder.clone(), builder.instances());
+            println!("Verification success!");
 
-            // println!("Size of the contract: {} bytes", deployment_code.len());
-            // println!("Deploying contract...");
-
-            // evm_verify(deployment_code, builder.instances(), proof.clone());
-
-            // println!("Verification success!");
-
-            // write_calldata(&builder.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
-            // println!("Succesfully generate calldata!");
+            write_calldata(&circuit.halo2base.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
+            println!("Succesfully generate calldata!");
         }
     }
 }

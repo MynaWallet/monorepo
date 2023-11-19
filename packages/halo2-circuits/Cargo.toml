@@ -15,25 +15,26 @@ halo2-rsa = { default-features = false, features = [
     "halo2-axiom",
     "display",
 ], path = "../../../halo2-rsa" }
-halo2-base = { branch = "sha256", default-features = false, features = [
+halo2-base = { default-features = false, features = [
     "halo2-axiom",
     "display",
     "test-utils",
-], git = "https://github.com/MynaWallet/halo2-lib.git" }
-halo2-ecc = { branch = "sha256", default-features = false, features = [
+], path = "../../../halo2-lib/halo2-base" }
+halo2-ecc = { default-features = false, features = [
     "halo2-axiom",
     "display",
-], git = "https://github.com/MynaWallet/halo2-lib.git" }
-zkevm-hashes = { branch = "sha256", default-features = false, features = [
+], path = "../../../halo2-lib/halo2-ecc" }
+zkevm-hashes = { default-features = false, features = [
     "halo2-axiom",
     "display",
-], git = "https://github.com/MynaWallet/halo2-lib.git" }
-# snark-verifier-sdk = { branch = "release-0.1.7-rc", default-features = false, features = [
-#     "halo2-axiom",
-#     "display",
-#     "loader_evm",
-#     "loader_halo2",
-# ], git = "https://github.com/axiom-crypto/snark-verifier.git" }
+], path = "../../../halo2-lib/hashes/zkevm" }
+snark-verifier-sdk = { default-features = false, features = [
+    "halo2-axiom",
+    "display",
+    "loader_evm",
+    "loader_halo2",
+    "revm"
+], path = "../../../snark-verifier/snark-verifier-sdk" }
 x509-parser = { version = "0.15", features = ["verify"] }
 openssl = "0.10"
 num-traits = "0.2.15"
