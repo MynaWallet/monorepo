@@ -12,7 +12,7 @@ use halo2_base::{
                 strategy::SingleStrategy,
             },
         },
-        transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer},
+        transcript::{Challenge255, Keccak256Read, Keccak256Write, TranscriptReadBuffer, TranscriptWriterBuffer},
         SerdeFormat,
     },
     utils::{fs::gen_srs, BigPrimeField},
@@ -174,14 +174,8 @@ fn main() {
                 password.into(),
             );
 
-            let instance_columns: Vec<Vec<Fr>> = circuit
-                .halo2base
-                .assigned_instances
-                .iter()
-                .map(|public_column| public_column.into_iter().map(|public_cell| public_cell.value().clone()).collect())
-                .collect();
-            let instance_columns: Vec<&[Fr]> =
-                instance_columns.iter().map(|instance_column| instance_column.as_slice()).collect();
+            let instance_columns = circuit.halo2base.instances();
+            let instance_columns: Vec<&[Fr]> = instance_columns.iter().map(|xs| xs.as_slice()).collect();
 
             let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
             let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
@@ -197,13 +191,13 @@ fn main() {
 
             let proof_file = File::create(proof_path).unwrap();
             println!("Proof generation started at: {:?}", std::time::Instant::now());
-            let mut proof = Blake2bWrite::<_, _, Challenge255<_>>::init(proof_file);
+            let mut proof = Keccak256Write::<_, _, Challenge255<_>>::init(proof_file);
             create_proof::<
                 KZGCommitmentScheme<Bn256>,
                 ProverSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
                 _,
-                Blake2bWrite<File, G1Affine, Challenge255<_>>,
+                Keccak256Write<File, G1Affine, Challenge255<_>>,
                 _,
             >(&trusted_setup, &pk, &[circuit], &[&instance_columns], OsRng, &mut proof)
             .expect("prover should not fail");
@@ -217,14 +211,8 @@ fn main() {
                 password.into(),
             );
 
-            let instance_columns: Vec<Vec<Fr>> = circuit
-                .halo2base
-                .assigned_instances
-                .iter()
-                .map(|public_column| public_column.into_iter().map(|public_cell| public_cell.value().clone()).collect())
-                .collect();
-            let instance_columns: Vec<&[Fr]> =
-                instance_columns.iter().map(|instance_column| instance_column.as_slice()).collect();
+            let instance_columns = circuit.halo2base.instances();
+            let instance_columns: Vec<&[Fr]> = instance_columns.iter().map(|xs| xs.as_slice()).collect();
 
             let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
             let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
@@ -239,13 +227,13 @@ fn main() {
             .unwrap();
 
             let proof_file = File::open(proof_path).unwrap();
-            let mut proof = Blake2bRead::init(&proof_file);
+            let mut proof = Keccak256Read::init(&proof_file);
 
             let result = verify_proof::<
                 KZGCommitmentScheme<Bn256>,
                 VerifierSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
-                Blake2bRead<&File, G1Affine, Challenge255<G1Affine>>,
+                Keccak256Read<&File, G1Affine, Challenge255<G1Affine>>,
                 SingleStrategy<'_, Bn256>,
             >(
                 &trusted_setup, &vk, SingleStrategy::new(&trusted_setup), &[&instance_columns], &mut proof
