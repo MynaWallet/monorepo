@@ -120,6 +120,8 @@ enum Commands {
         // citizen's certificate
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
+        #[arg(short, long, default_value = "./build/verifier.sol")]
+        solidity_path: String,
         // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
@@ -240,7 +242,14 @@ fn main() {
             );
             assert!(result.is_ok(), "{:?}", result)
         }
-        Commands::GenerateSolidity { trusted_setup_path, pk_path, verify_cert_path, issuer_cert_path, password } => {
+        Commands::GenerateSolidity {
+            trusted_setup_path,
+            pk_path,
+            verify_cert_path,
+            issuer_cert_path,
+            password,
+            solidity_path,
+        } => {
             let circuit = circuit::ProofOfJapaneseResidence::new(
                 issuer_cert_path.into(),
                 verify_cert_path.into(),
@@ -264,7 +273,7 @@ fn main() {
                 &trusted_setup,
                 &pk.get_vk(),
                 circuit.halo2base.num_instance(),
-                Some(Path::new("./build/VerifyRsa.sol")),
+                Some(Path::new(&solidity_path)),
             );
 
             println!("Size of the contract: {} bytes", deployment_code.len());
