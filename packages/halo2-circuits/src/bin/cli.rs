@@ -24,6 +24,7 @@ use std::{
     fmt::Binary,
     fs::File,
     io::{Read, Write},
+    path::PathBuf,
 };
 // use snark_verifier_sdk::
 // use snark_verifier_sdk::{
@@ -150,34 +151,11 @@ fn main() {
             vk_path,
             pk_path,
         } => {
-            let nation_pubkey = read_nation_cert(&issuer_cert_path);
-            let (nation_sig, tbs_cert, _citizen_pubkey) = read_citizen_cert(&verify_cert_path);
-
-            let mut builder = BaseCircuitBuilder::new(false);
-            builder.set_k(circuit::K as usize);
-            builder.set_lookup_bits(circuit::LOOKUP_BITS);
-            builder.set_instance_columns(1);
-            let range_chip = builder.range_chip();
-            let ctx = builder.main(0);
-
-            let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
-            sha256ed.reverse();
-            let mut buf = [0; 32];
-            buf[0..16].copy_from_slice(&sha256ed[0..16]);
-            let sha256lo = Fr::from_bytes(&buf).unwrap();
-            buf[0..16].copy_from_slice(&sha256ed[16..32]);
-            let sha256hi = Fr::from_bytes(&buf).unwrap();
-
-            let public_input = circuit::PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey };
-            let private_input = circuit::PrivateInput { nation_sig, password: Fr::from(password) };
-            let public_output = circuit::proof_of_japanese_residence(ctx, range_chip, public_input, private_input);
-            builder.assigned_instances[0].extend(public_output);
-
-            let circuit_shape = builder.calculate_params(None);
-            let circuit = circuit::ProofOfJapaneseResidence {
-                halo2base: builder.use_params(circuit_shape),
-                tbs_cert: tbs_cert.to_bytes_le(),
-            };
+            let circuit = circuit::ProofOfJapaneseResidence::new(
+                issuer_cert_path.into(),
+                verify_cert_path.into(),
+                password.into(),
+            );
 
             let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
             let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
@@ -192,34 +170,11 @@ fn main() {
             pk.write(&mut pk_file, SerdeFormat::RawBytes).unwrap();
         }
         Commands::Prove { verify_cert_path, issuer_cert_path, password, trusted_setup_path, pk_path, proof_path } => {
-            let nation_pubkey = read_nation_cert(&issuer_cert_path);
-            let (nation_sig, tbs_cert, _citizen_pubkey) = read_citizen_cert(&verify_cert_path);
-
-            let mut builder = BaseCircuitBuilder::new(false);
-            builder.set_k(circuit::K as usize);
-            builder.set_lookup_bits(circuit::LOOKUP_BITS);
-            builder.set_instance_columns(1);
-            let range_chip = builder.range_chip();
-            let ctx = builder.main(0);
-
-            let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
-            sha256ed.reverse();
-            let mut buf = [0; 32];
-            buf[0..16].copy_from_slice(&sha256ed[0..16]);
-            let sha256lo = Fr::from_bytes(&buf).unwrap();
-            buf[0..16].copy_from_slice(&sha256ed[16..32]);
-            let sha256hi = Fr::from_bytes(&buf).unwrap();
-
-            let public_input = circuit::PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey };
-            let private_input = circuit::PrivateInput { nation_sig, password: Fr::from(password) };
-            let public_output = circuit::proof_of_japanese_residence(ctx, range_chip, public_input, private_input);
-            builder.assigned_instances[0].extend(public_output);
-
-            let circuit_shape = builder.calculate_params(None);
-            let circuit = circuit::ProofOfJapaneseResidence {
-                halo2base: builder.use_params(circuit_shape),
-                tbs_cert: tbs_cert.to_bytes_le(),
-            };
+            let circuit = circuit::ProofOfJapaneseResidence::new(
+                issuer_cert_path.into(),
+                verify_cert_path.into(),
+                password.into(),
+            );
 
             let instance_columns: Vec<Vec<Fr>> = circuit
                 .halo2base
@@ -258,34 +213,11 @@ fn main() {
             println!("Proof generation finished at: {:?}", std::time::Instant::now());
         }
         Commands::Verify { trusted_setup_path, vk_path, proof_path, verify_cert_path, issuer_cert_path, password } => {
-            let nation_pubkey = read_nation_cert(&issuer_cert_path);
-            let (nation_sig, tbs_cert, _citizen_pubkey) = read_citizen_cert(&verify_cert_path);
-
-            let mut builder = BaseCircuitBuilder::new(false);
-            builder.set_k(circuit::K as usize);
-            builder.set_lookup_bits(circuit::LOOKUP_BITS);
-            builder.set_instance_columns(1);
-            let range_chip = builder.range_chip();
-            let ctx = builder.main(0);
-
-            let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
-            sha256ed.reverse();
-            let mut buf = [0; 32];
-            buf[0..16].copy_from_slice(&sha256ed[0..16]);
-            let sha256lo = Fr::from_bytes(&buf).unwrap();
-            buf[0..16].copy_from_slice(&sha256ed[16..32]);
-            let sha256hi = Fr::from_bytes(&buf).unwrap();
-
-            let public_input = circuit::PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey };
-            let private_input = circuit::PrivateInput { nation_sig, password: Fr::from(password) };
-            let public_output = circuit::proof_of_japanese_residence(ctx, range_chip, public_input, private_input);
-            builder.assigned_instances[0].extend(public_output);
-
-            let circuit_shape = builder.calculate_params(None);
-            let circuit = circuit::ProofOfJapaneseResidence {
-                halo2base: builder.use_params(circuit_shape),
-                tbs_cert: tbs_cert.to_bytes_le(),
-            };
+            let circuit = circuit::ProofOfJapaneseResidence::new(
+                issuer_cert_path.into(),
+                verify_cert_path.into(),
+                password.into(),
+            );
 
             let instance_columns: Vec<Vec<Fr>> = circuit
                 .halo2base

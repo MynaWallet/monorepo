@@ -1,3 +1,4 @@
+use crate::helpers::{read_citizen_cert, read_nation_cert};
 use halo2_base::{
     gates::{
         circuit::{builder::BaseCircuitBuilder, BaseCircuitParams, BaseConfig},
@@ -19,7 +20,8 @@ use halo2_rsa::{
 };
 use num_bigint::BigUint;
 use num_traits::One;
-use sha2::Digest;
+use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 use zkevm_hashes::sha256::vanilla::columns::Sha256CircuitConfig;
 // use zkevm_hashes::Sha256Chip;
 
@@ -38,12 +40,11 @@ pub struct PrivateInput {
     pub password: Fr,
 }
 
-// halo2-sha256-unoptimized takes inputs byte by byte so I guess 8 is optimimal
 pub const LOOKUP_BITS: usize = 16;
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 18;
+pub const K: usize = 20;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
 const TBS_CERT_MAX_BITS: usize = 1 << 12;
@@ -201,6 +202,36 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 }
 
+impl ProofOfJapaneseResidence {
+    pub fn new(nation_cert_path: PathBuf, citizen_cert_path: PathBuf, user_secret: Fr) -> Self {
+        let nation_pubkey = read_nation_cert(nation_cert_path.to_str().unwrap());
+        let (nation_sig, tbs_cert, _citizen_pubkey) = read_citizen_cert(citizen_cert_path.to_str().unwrap());
+
+        let mut builder = BaseCircuitBuilder::new(false);
+        builder.set_k(K as usize);
+        builder.set_lookup_bits(LOOKUP_BITS);
+        builder.set_instance_columns(1);
+        let range_chip = builder.range_chip();
+        let ctx = builder.main(0);
+
+        let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
+        sha256ed.reverse();
+        let mut buf = [0; 32];
+        buf[0..16].copy_from_slice(&sha256ed[0..16]);
+        let sha256lo = Fr::from_bytes(&buf).unwrap();
+        buf[0..16].copy_from_slice(&sha256ed[16..32]);
+        let sha256hi = Fr::from_bytes(&buf).unwrap();
+
+        let public_input = PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey };
+        let private_input = PrivateInput { nation_sig, password: user_secret };
+        let public_output = proof_of_japanese_residence(ctx, range_chip, public_input, private_input);
+        builder.assigned_instances[0].extend(public_output);
+
+        let circuit_shape = builder.calculate_params(Some(K));
+        Self { halo2base: builder.use_params(circuit_shape), tbs_cert: tbs_cert.to_bytes_le() }
+    }
+}
+
 pub fn proof_of_japanese_residence(
     ctx: &mut Context<Fr>,
     range_chip: RangeChip<Fr>,
@@ -343,34 +374,8 @@ mod tests {
 
     #[test]
     fn mock() {
-        let mut builder = BaseCircuitBuilder::default();
-        builder.set_k(K);
-        builder.set_lookup_bits(LOOKUP_BITS);
-        builder.set_instance_columns(1);
-        let range_chip = builder.range_chip().clone();
-
-        let nation_pubkey = read_nation_cert("./certs/ca_cert.pem");
-        let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert("./certs/myna_cert.pem");
-
-        let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
-        sha256ed.reverse();
-        let mut buf = [0; 32];
-        buf[0..16].copy_from_slice(&sha256ed[0..16]);
-        let sha256lo = Fr::from_bytes(&buf).unwrap();
-        buf[0..16].copy_from_slice(&sha256ed[16..32]);
-        let sha256hi = Fr::from_bytes(&buf).unwrap();
-
-        let public_input = PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey: nation_pubkey.clone() };
-        let private_input = PrivateInput { nation_sig: nation_sig.clone(), password: Fr::from(0xA42) };
-        let public_output =
-            proof_of_japanese_residence(builder.pool(0).main(), range_chip, public_input, private_input);
-
-        dbg!(&public_output);
-        builder.assigned_instances[0].extend(public_output);
-        // AUDIT: Is K enough to achieve zero knowledge?
-        builder.calculate_params(Some(9));
-
-        let circuit = ProofOfJapaneseResidence { halo2base: builder, tbs_cert: tbs_cert.to_bytes_le() };
+        let circuit =
+            ProofOfJapaneseResidence::new("./certs/ca_cert.pem".into(), "./certs/myna_cert.pem".into(), 0xA42.into());
 
         MockProver::run(
             K as u32,
