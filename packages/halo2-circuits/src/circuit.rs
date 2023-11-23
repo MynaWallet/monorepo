@@ -47,7 +47,7 @@ const E: usize = 65537;
 pub const K: usize = 20;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
-const TBS_CERT_MAX_BITS: usize = 1 << 12;
+const TBS_CERT_MAX_BITS: usize = 2048 * 8;
 
 pub fn bytes_to_biguint(
     ctx: &mut Context<Fr>,
@@ -159,6 +159,8 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
+        dbg!(self.tbs_cert.len());
+
         let mut assigned_blocks = Vec::new();
         layouter.assign_region(
             || "SHA256",
@@ -166,30 +168,29 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
                 assigned_blocks = config.sha256.multi_sha256(
                     &mut region,
                     vec![self.tbs_cert.clone()],
-                    None,
-                    // TODO: We should specify here the number of SHA256 blocks thats necessary to fit the input in
-                    // but when I do so zkevm-hashes panics. Why?? Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS)
+                    Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS),
                 );
                 Ok(())
             },
         )?;
 
         // let mut final_block = None;
-        // for block in assigned_blocks.iter() {
+        // for (i, block) in assigned_blocks.iter().enumerate() {
         //     block.is_final().value().map(|is_final| {
         //         if Fr::zero() < is_final.evaluate() {
         //             final_block = Some(block);
         //         }
         //     });
 
-        //     if let Some(_) = final_block {
-        //         break;
-        //     }
+        //     // if let Some(_) = final_block {
+        //     //     dbg!(i);
+        //     //     break;
+        //     // }
         // }
         // let final_block = final_block.expect("zkevm-hashes failed to generate a SHA256 hash");
-        // dbg!(final_block.output());
 
-        // TODO: Support longer inputs;
+        // The final block appears in [20] because of the length of certs/myna_cert.pem.
+        // TODO: Support pem with dynamic length.
         let final_block = &assigned_blocks[20];
 
         // TODO: Hide these
