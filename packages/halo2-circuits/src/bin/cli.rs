@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use halo2_base::{
     gates::circuit::builder::BaseCircuitBuilder,
     halo2_proofs::{
+        dev::MockProver,
         halo2curves::bn256::{Bn256, Fr, G1Affine},
         plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ProvingKey, VerifyingKey},
         poly::{
@@ -175,9 +176,7 @@ fn main() {
                 verify_cert_path.into(),
                 password.into(),
             );
-
-            let instance_columns = circuit.halo2base.instances();
-            let instance_columns: Vec<&[Fr]> = instance_columns.iter().map(|xs| xs.as_slice()).collect();
+            let instance_column = circuit.instance_column();
 
             let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
             let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
@@ -201,7 +200,7 @@ fn main() {
                 _,
                 Keccak256Write<File, G1Affine, Challenge255<_>>,
                 _,
-            >(&trusted_setup, &pk, &[circuit], &[&instance_columns], OsRng, &mut proof)
+            >(&trusted_setup, &pk, &[circuit], &[&[&instance_column]], OsRng, &mut proof)
             .expect("prover should not fail");
             proof.finalize();
             println!("Proof generation finished at: {:?}", std::time::Instant::now());
@@ -212,9 +211,6 @@ fn main() {
                 verify_cert_path.into(),
                 password.into(),
             );
-
-            let instance_columns = circuit.halo2base.instances();
-            let instance_columns: Vec<&[Fr]> = instance_columns.iter().map(|xs| xs.as_slice()).collect();
 
             let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
             let trusted_setup = ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes)
@@ -238,7 +234,11 @@ fn main() {
                 Keccak256Read<&File, G1Affine, Challenge255<G1Affine>>,
                 SingleStrategy<'_, Bn256>,
             >(
-                &trusted_setup, &vk, SingleStrategy::new(&trusted_setup), &[&instance_columns], &mut proof
+                &trusted_setup,
+                &vk,
+                SingleStrategy::new(&trusted_setup),
+                &[&[&circuit.instance_column()]],
+                &mut proof,
             );
             assert!(result.is_ok(), "{:?}", result)
         }
@@ -268,22 +268,22 @@ fn main() {
             )
             .unwrap();
 
-            let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit.clone(), circuit.halo2base.instances());
+            let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit.clone(), vec![circuit.instance_column()]);
             let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
                 &trusted_setup,
                 &pk.get_vk(),
-                circuit.halo2base.num_instance(),
+                vec![circuit.instance_column().len()],
                 Some(Path::new(&solidity_path)),
             );
 
             println!("Size of the contract: {} bytes", deployment_code.len());
             println!("Deploying contract...");
 
-            evm_verify(deployment_code, circuit.halo2base.instances(), proof.clone());
+            evm_verify(deployment_code, vec![circuit.instance_column()], proof.clone());
 
             println!("Verification success!");
 
-            write_calldata(&circuit.halo2base.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
+            write_calldata(&[circuit.instance_column()], &proof, Path::new("./build/calldata.txt")).unwrap();
             println!("Succesfully generate calldata!");
         }
     }

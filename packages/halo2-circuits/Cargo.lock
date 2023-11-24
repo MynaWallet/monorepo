@@ -1331,6 +1331,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "openssl",
+ "pse-poseidon",
  "rand",
  "rayon",
  "rsa",
@@ -2248,6 +2249,15 @@ dependencies = [
  "rand_xorshift",
  "regex-syntax",
  "unarray",
+]
+
+[[package]]
+name = "pse-poseidon"
+version = "0.2.0"
+source = "git+https://github.com/axiom-crypto/pse-poseidon.git#19d3b09481bda0e95e7c005906365d070fceb752"
+dependencies = [
+ "halo2curves-axiom",
+ "subtle",
 ]
 
 [[package]]

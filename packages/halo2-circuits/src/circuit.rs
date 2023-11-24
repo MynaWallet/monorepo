@@ -11,6 +11,7 @@ use halo2_base::{
         plonk::{Assignment, Circuit, ConstraintSystem, Error},
     },
     poseidon::hasher::{spec::OptimizedPoseidonSpec, PoseidonHasher},
+    utils::halo2::Halo2AssignedCell,
     AssignedValue, Context, QuantumCell,
 };
 use halo2_ecc::bigint::OverflowInteger;
@@ -20,10 +21,9 @@ use halo2_rsa::{
 };
 use num_bigint::BigUint;
 use num_traits::One;
-use sha2::{Digest, Sha256};
-use std::path::PathBuf;
-use zkevm_hashes::sha256::vanilla::columns::Sha256CircuitConfig;
-// use zkevm_hashes::Sha256Chip;
+use pse_poseidon::Poseidon;
+use std::{cmp::Ordering, path::PathBuf};
+use zkevm_hashes::sha256::vanilla::{columns::Sha256CircuitConfig, param::NUM_WORDS_TO_ABSORB};
 
 #[derive(Debug, Clone)]
 pub struct PublicInput {
@@ -49,80 +49,118 @@ const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
 const TBS_CERT_MAX_BITS: usize = 2048 * 8;
 
-pub fn bytes_to_biguint(
-    ctx: &mut Context<Fr>,
-    biguint_chip: BigUintConfig<Fr>,
-    bytes: &[AssignedValue<Fr>],
-) -> AssignedBigUint<Fr, Fresh> {
-    let num_bases = (biguint_chip.limb_bits() / 8) as u64;
-    let bases: Vec<QuantumCell<Fr>> =
-        (0..num_bases).map(|i| QuantumCell::Constant(Fr::from(2).pow_vartime([i * 8]))).collect();
-    let dest_limbs = bytes
-        .chunks(biguint_chip.limb_bits() / 8)
-        .map(|bytes_in_limb| {
-            let dest_limb = biguint_chip.gate().inner_product(ctx, bytes_in_limb.to_vec(), bases.clone());
-            biguint_chip.range().range_check(ctx, dest_limb, biguint_chip.limb_bits());
-            dest_limb
-        })
-        .collect();
-
-    let bytes_in_rust: Vec<u8> = bytes.iter().map(|byte| byte.value().to_bytes()[0].clone()).collect();
-    let dest_in_rust = BigUint::from_bytes_le(&bytes_in_rust);
-    AssignedBigUint::new(OverflowInteger::new(dest_limbs, biguint_chip.limb_bits()), dest_in_rust)
-}
-
-pub fn bytes_to_64s(
-    ctx: &mut Context<Fr>,
-    range_chip: RangeChip<Fr>,
-    src: &[AssignedValue<Fr>],
-) -> Vec<AssignedValue<Fr>> {
-    // bug
-    let biguint_chip = BigUintConfig::construct(range_chip, 64);
-    bytes_to_biguint(ctx, biguint_chip, src).limbs().to_vec()
-}
-
 pub fn biguint_to_fr(src: BigUint) -> Fr {
     let mut buf = [0; 32];
     buf[0..src.to_bytes_le().len()].copy_from_slice(&src.to_bytes_le());
     Fr::from_bytes(&buf).expect("a BigUint was too big to fit in a Fr")
 }
 
-pub fn split_each_limb(
+pub fn slice_bits(
     ctx: &mut Context<Fr>,
     range_chip: &RangeChip<Fr>,
-    big_limbs: &[AssignedValue<Fr>],
-    big_limb_bits: usize,
-    small_limb_bits: usize,
+    src_limbs: &[AssignedValue<Fr>],
+    src_limb_width: usize,
+    dest_limb_width: usize,
+    since: usize,
+    until: usize,
 ) -> Vec<AssignedValue<Fr>> {
-    assert_eq!(0, big_limb_bits % small_limb_bits);
-    assert!(small_limb_bits < big_limb_bits);
+    assert!(0 < src_limb_width);
+    assert!(0 < dest_limb_width);
+    assert!(254 > src_limb_width);
 
-    let limb_bases = (0..).map(|x| QuantumCell::Constant(biguint_to_fr(BigUint::one() << (x * small_limb_bits))));
-    let mut small_limbs: Vec<AssignedValue<Fr>> = Vec::new();
-    for big_limb in big_limbs {
-        let mut offset = 0;
-        while offset < big_limb_bits {
-            let small_limb =
-                (BigUint::from_bytes_le(&big_limb.value().to_bytes()) >> offset) % (BigUint::one() << small_limb_bits);
-            let small_limb = ctx.load_witness(biguint_to_fr(small_limb));
-            range_chip.range_check(ctx, small_limb, small_limb_bits);
-            small_limbs.push(small_limb);
-            offset += small_limb_bits;
-        }
+    assert!(254 > dest_limb_width);
+    let zero_part = (ctx.load_zero(), 0);
+    let mut parts: Vec<(AssignedValue<Fr>, usize)> = Vec::new();
 
-        let small_to_big = range_chip.gate().inner_product(
-            ctx,
-            small_limbs
-                .iter()
-                .skip(small_limbs.len() - big_limb_bits / small_limb_bits)
-                .copied()
-                .map(QuantumCell::Existing),
-            limb_bases.clone(),
-        );
-        ctx.constrain_equal(big_limb, &small_to_big);
+    // split src into parts
+    let mut read_bits = since;
+    while read_bits < until {
+        let read_limbs = read_bits / src_limb_width;
+        let part_offset = read_bits % src_limb_width;
+        let part_width = (src_limb_width - read_bits % src_limb_width)
+            .min(dest_limb_width - (read_bits - since) % dest_limb_width)
+            .min(until - read_bits);
+        let part_biguint = (BigUint::from_bytes_le(&src_limbs[read_limbs].value().to_bytes()) >> part_offset)
+            % (BigUint::one() << part_width);
+        let part_witness = ctx.load_witness(biguint_to_fr(part_biguint));
+        range_chip.range_check(ctx, part_witness, part_width);
+        parts.push((part_witness, part_width));
+        read_bits += part_width;
     }
 
-    small_limbs
+    // constrain against dest
+    let mut dest_parts: Vec<(AssignedValue<Fr>, usize)> = Vec::new();
+    let mut dest_limbs: Vec<AssignedValue<Fr>> = Vec::new();
+    for (i, part) in parts.iter().cloned().enumerate() {
+        dest_parts.push(part);
+
+        if dest_parts.iter().map(|(_, part_width)| *part_width).sum::<usize>() == dest_limb_width
+            || i == parts.len() - 1
+        {
+            let dest_limb = range_chip.gate().inner_product(
+                ctx,
+                dest_parts.iter().map(|(part_witness, _)| part_witness.clone()),
+                std::iter::once(&zero_part)
+                    .chain(dest_parts.iter())
+                    .scan(BigUint::one(), |acc, (_, part_width)| {
+                        *acc <<= *part_width;
+                        Some(acc.clone())
+                    })
+                    .map(|part_base| QuantumCell::Constant(biguint_to_fr(part_base))),
+            );
+            dest_limbs.push(dest_limb);
+            dest_parts.clear();
+        }
+    }
+
+    // constrain against src
+    let first_part_width = since % src_limb_width;
+    if 0 < first_part_width {
+        let first_part_witness = ctx.load_witness(biguint_to_fr(
+            BigUint::from_bytes_le(&src_limbs[since / src_limb_width].value().to_bytes())
+                % (BigUint::one() << first_part_width),
+        ));
+        parts.insert(0, (first_part_witness, first_part_width));
+    } else {
+        parts.insert(0, zero_part.clone());
+    };
+
+    let last_part_offset = until % src_limb_width;
+    if 0 < last_part_offset {
+        let last_part_witness = ctx.load_witness(biguint_to_fr(
+            BigUint::from_bytes_le(&src_limbs[until / src_limb_width].value().to_bytes()) >> last_part_offset,
+        ));
+        let last_part_width = src_limb_width - last_part_offset;
+        parts.push((last_part_witness, last_part_width));
+    } else {
+        parts.push(zero_part.clone());
+    }
+
+    let mut src_parts: Vec<(AssignedValue<Fr>, usize)> = Vec::new();
+    let mut read_limbs = since / src_limb_width;
+    for part in parts {
+        src_parts.push(part);
+
+        if src_parts.iter().map(|(_, part_width)| *part_width).sum::<usize>() == src_limb_width {
+            let src_limb = range_chip.gate().inner_product(
+                ctx,
+                src_parts.iter().map(|(part_witness, _)| part_witness.clone()),
+                std::iter::once(&zero_part)
+                    .chain(src_parts.iter())
+                    .scan(BigUint::one(), |acc, (_, part_width)| {
+                        *acc <<= *part_width;
+                        Some(acc.clone())
+                    })
+                    .map(|part_base| QuantumCell::Constant(biguint_to_fr(part_base))),
+            );
+
+            ctx.constrain_equal(&src_limbs[read_limbs], &src_limb);
+            src_parts.clear();
+            read_limbs += 1;
+        }
+    }
+
+    dest_limbs
 }
 
 #[derive(Debug, Clone)]
@@ -133,8 +171,13 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct ProofOfJapaneseResidence {
-    pub halo2base: BaseCircuitBuilder<Fr>,
     pub tbs_cert: Vec<u8>,
+    // 2048 bits
+    pub nation_sig: BigUint,
+    // 2048 bits
+    pub nation_pubkey: BigUint,
+    pub user_secret: Fr,
+    pub citizen_pubkey: BigUint,
 }
 
 impl Circuit<Fr> for ProofOfJapaneseResidence {
@@ -147,7 +190,14 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn params(&self) -> Self::Params {
-        self.halo2base.config_params.clone()
+        Self::Params {
+            k: K,
+            num_advice_per_phase: vec![1],
+            num_fixed: 1,
+            num_lookup_advice_per_phase: vec![1, 0, 0],
+            lookup_bits: Some(LOOKUP_BITS),
+            num_instance_columns: 1,
+        }
     }
 
     fn configure_with_params(meta: &mut ConstraintSystem<Fr>, params: BaseCircuitParams) -> Self::Config {
@@ -191,13 +241,54 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
 
         // The final block appears in [20] because of the length of certs/myna_cert.pem.
         // TODO: Support pem with dynamic length.
-        let final_block = &assigned_blocks[20];
+        let sha256out = &assigned_blocks[20].output();
 
-        // TODO: Hide these
-        layouter.constrain_instance(final_block.output().lo().cell(), config.halo2base.instance[0], 0);
-        layouter.constrain_instance(final_block.output().hi().cell(), config.halo2base.instance[0], 1);
+        let mut halo2base = BaseCircuitBuilder::new(false).use_params(self.params());
+        let (sha256lo, sha256hi) = {
+            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
+            (lock.load_external_assigned(sha256out.lo()), lock.load_external_assigned(sha256out.hi()))
+        };
+        let tbs_cert_32s: Vec<AssignedValue<Fr>> = {
+            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
+            assigned_blocks
+                .iter()
+                .flat_map(|assigned_block| {
+                    assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
+                })
+                .collect()
+        };
 
-        self.halo2base.synthesize(config.halo2base, layouter).unwrap();
+        let range_chip = halo2base.range_chip();
+        let ctx = halo2base.main(0);
+
+        let biguint_chip: BigUintConfig<Fr> = BigUintConfig::construct(range_chip.clone(), LIMB_BITS);
+        let rsa_chip = RSAConfig::construct(biguint_chip, RSA_KEY_SIZE, 5);
+        let mut poseidon = PoseidonHasher::new(OptimizedPoseidonSpec::<Fr, 3, 2>::new::<8, 57, 0>());
+        poseidon.initialize_consts(ctx, rsa_chip.gate());
+
+        // load public inputs
+        let nation_pubkey = rsa_chip
+            .assign_public_key(ctx, RSAPublicKey::new(self.nation_pubkey.clone(), RSAPubE::Fix(E.into())))
+            .unwrap();
+
+        // load private inputs
+        let nation_sig = rsa_chip.assign_signature(ctx, RSASignature::new(self.nation_sig.clone())).unwrap();
+        let user_secret = ctx.load_witness(self.user_secret);
+
+        let sha256ed_64s = slice_bits(ctx, rsa_chip.range(), &[sha256lo, sha256hi], 128, 64, 0, 256);
+        let is_nation_sig_valid =
+            rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
+        rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
+
+        let mut identity_commitment_preimage = vec![user_secret];
+        let citizen_pubkey =
+            slice_bits(ctx, rsa_chip.range(), &tbs_cert_32s, 32, 253, PUBKEY_BEGINS, PUBKEY_BEGINS + RSA_KEY_SIZE);
+        identity_commitment_preimage.extend(citizen_pubkey);
+        let identity_commitment = poseidon.hash_fix_len_array(ctx, rsa_chip.gate(), &identity_commitment_preimage);
+
+        halo2base.assigned_instances[0].extend(nation_pubkey.n.limbs().to_vec());
+        halo2base.assigned_instances[0].push(identity_commitment);
+        halo2base.synthesize(config.halo2base, layouter).unwrap();
 
         Ok(())
     }
@@ -206,128 +297,27 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
 impl ProofOfJapaneseResidence {
     pub fn new(nation_cert_path: PathBuf, citizen_cert_path: PathBuf, user_secret: Fr) -> Self {
         let nation_pubkey = read_nation_cert(nation_cert_path.to_str().unwrap());
-        let (nation_sig, tbs_cert, _citizen_pubkey) = read_citizen_cert(citizen_cert_path.to_str().unwrap());
+        let (nation_sig, tbs_cert, citizen_pubkey) = read_citizen_cert(citizen_cert_path.to_str().unwrap());
 
-        let mut builder = BaseCircuitBuilder::new(false);
-        builder.set_k(K as usize);
-        builder.set_lookup_bits(LOOKUP_BITS);
-        builder.set_instance_columns(1);
-        let range_chip = builder.range_chip();
-        let ctx = builder.main(0);
-
-        let mut sha256ed = Sha256::digest(tbs_cert.to_bytes_le());
-        sha256ed.reverse();
-        let mut buf = [0; 32];
-        buf[0..16].copy_from_slice(&sha256ed[0..16]);
-        let sha256lo = Fr::from_bytes(&buf).unwrap();
-        buf[0..16].copy_from_slice(&sha256ed[16..32]);
-        let sha256hi = Fr::from_bytes(&buf).unwrap();
-
-        let public_input = PublicInput { sha256: [sha256lo, sha256hi], nation_pubkey };
-        let private_input = PrivateInput { nation_sig, password: user_secret };
-        let public_output = proof_of_japanese_residence(ctx, range_chip, public_input, private_input);
-        builder.assigned_instances[0].extend(public_output);
-
-        let circuit_shape = builder.calculate_params(Some(K));
-        Self { halo2base: builder.use_params(circuit_shape), tbs_cert: tbs_cert.to_bytes_le() }
+        Self { tbs_cert: tbs_cert.to_bytes_le(), user_secret, nation_sig, nation_pubkey, citizen_pubkey }
     }
-}
 
-pub fn proof_of_japanese_residence(
-    ctx: &mut Context<Fr>,
-    range_chip: RangeChip<Fr>,
-    public: PublicInput,
-    private: PrivateInput,
-) -> Vec<AssignedValue<Fr>> {
-    let biguint_chip: BigUintConfig<Fr> = BigUintConfig::construct(range_chip.clone(), LIMB_BITS);
-    let rsa_chip = RSAConfig::construct(biguint_chip, RSA_KEY_SIZE, 5);
-    // let mut sha256_chip =
-    //     Sha256Chip::construct(vec![SHA256_INPUT_BLOCKS * SHA256_BLOCK_BITS / 8], range_chip.clone(), true);
-    let mut poseidon = PoseidonHasher::new(OptimizedPoseidonSpec::<Fr, 3, 2>::new::<8, 57, 0>());
-    poseidon.initialize_consts(ctx, rsa_chip.gate());
+    pub fn instance_column(&self) -> Vec<Fr> {
+        let mut instance_column: Vec<Fr> = self.nation_pubkey.iter_u64_digits().map(Fr::from).collect();
+        let mut hasher = Poseidon::<Fr, 3, 2>::new(8, 57);
+        let mut preimage = vec![self.user_secret];
 
-    let sha256lo = ctx.load_witness(public.sha256[0]);
-    let sha256hi = ctx.load_witness(public.sha256[1]);
+        for i in 0..=(2048 / 253) {
+            let limb = (self.citizen_pubkey.clone() >> (i * 253)) % (BigUint::one() << 253);
+            preimage.push(biguint_to_fr(limb));
+        }
 
-    // load public inputs
-    let nation_pubkey =
-        rsa_chip.assign_public_key(ctx, RSAPublicKey::new(public.nation_pubkey, RSAPubE::Fix(E.into()))).unwrap();
+        hasher.update(&preimage);
+        let identity_commitment = hasher.squeeze();
+        instance_column.push(identity_commitment);
 
-    // load private inputs
-    let nation_sig = rsa_chip.assign_signature(ctx, RSASignature::new(private.nation_sig)).unwrap();
-    let password = ctx.load_witness(private.password);
-
-    // extract citizen's public key from the tbs certificate
-    // let n = bytes_to_biguint(
-    //     ctx,
-    //     rsa_chip.biguint_config().clone(),
-    //     &sha256ed.input_bytes[PUBKEY_BEGINS / 8..PUBKEY_BEGINS / 8 + RSA_KEY_SIZE / 8],
-    // );
-    // let citizen_pubkey = AssignedRSAPublicKey::new(n.clone(), AssignedRSAPubE::Fix(E.into()));
-
-    // let sha256ed = sha256_chip.digest(ctx, &private.tbs_cert, None).unwrap();
-    // let identity_commitment_preimage: Vec<AssignedValue<Fr>> = sha256ed.input_bytes
-    //     [PUBKEY_BEGINS / 8..(PUBKEY_BEGINS + RSA_KEY_SIZE) / 8]
-    //     .iter()
-    //     .copied()
-    //     .chain(std::iter::once(password))
-    //     .collect();
-
-    // println!("sha256ed");
-    // for byte in &sha256ed.input_bytes[PUBKEY_BEGINS / 8..(PUBKEY_BEGINS + RSA_KEY_SIZE) / 8] {
-    //     let byte = byte.value().to_repr()[0];
-    //     print!("{:0b}", byte);
-    // }
-
-    // let identity_commitment = poseidon.hash_fix_len_array(ctx, rsa_chip.gate(), &identity_commitment_preimage);
-
-    // let sha256ed_64s =
-    //     bytes_to_64s(ctx, range_chip.clone(), &sha256ed.output_bytes.iter().rev().copied().collect::<Vec<_>>());
-
-    // assert_eq!(
-    //     sha256ed_64s.iter().flat_map(|a| a.value().to_bytes()[0..8].to_vec()).collect::<Vec<_>>(),
-    //     Sha256::digest(private.tbs_cert).to_vec()
-    // );
-    // println!("sha256ed_64s.len(): {}", sha256ed_64s.len());
-    // for bytes in sha256ed_64s.iter() {
-    //     let limbs = bytes.value().to_bytes();
-    //     for limb in limbs {
-    //         print!("{:0b}", limb);
-    //     }
-    // }
-    // println!("aa");
-
-    // let hashed_tbs = Sha256::digest(private.tbs_cert);
-    // println!("Hashed TBS: {:?}", hashed_tbs);
-    // let mut hashed_bytes: Vec<AssignedValue<Fr>> =
-    //     hashed_tbs.iter().map(|limb| ctx.load_witness(Fr::from(*limb as u64))).collect();
-    // hashed_bytes.reverse();
-    // let bytes_bits = hashed_bytes.len() * 8;
-    // let limb_bits = 64;
-    // let limb_bytes = limb_bits / 8;
-    // let mut hashed_u64s = vec![];
-    // let bases: Vec<_> = (0..limb_bytes).map(|i| Fr::from(1u64 << (8 * i))).map(QuantumCell::Constant).collect();
-    // for i in 0..(bytes_bits / limb_bits) {
-    //     let left: Vec<_> =
-    //         hashed_bytes[limb_bytes * i..limb_bytes * (i + 1)].iter().map(|x| QuantumCell::Existing(*x)).collect();
-    //     let sum = rsa_chip.gate().inner_product(ctx, left, bases.clone());
-    //     hashed_u64s.push(sum);
-    // }
-
-    // assert_eq!(
-    //     sha256ed_64s.iter().map(|a| a.value()).collect::<Vec<_>>(),
-    //     hashed_u64s.iter().map(|a| a.value()).collect::<Vec<_>>()
-    // );
-
-    let sha256ed_64s = split_each_limb(ctx, rsa_chip.range(), &[sha256lo, sha256hi], 128, 64);
-    let is_nation_sig_valid =
-        rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
-    rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
-
-    let mut outputs = vec![sha256lo, sha256hi];
-    // outputs.push(identity_commitment);
-    outputs.extend(nation_pubkey.n.limbs().to_vec());
-    outputs
+        instance_column
+    }
 }
 
 #[cfg(test)]
@@ -341,54 +331,14 @@ mod tests {
     use num_traits::cast::ToPrimitive;
     use sha2::Sha256;
 
-    // TODO: Write tests for failure cases
-    // #[test]
-    // fn extract_citizen_pubkey() {
-    //     let (_, tbs_cert, expected_citizen_pubkey) = read_citizen_cert("certs/myna_cert.pem");
-    //     base_test().k(LOOKUP_BITS as u32).bench_builder((), (), |pool, range_chip, _| {
-    //         let biguint_chip: BigUintConfig<Fr> = BigUintConfig::construct(range_chip.clone(), LIMB_BITS);
-    //         let tbs_cert = biguint_chip.assign_integer(pool.main(), &tbs_cert, 1 << 15).unwrap();
-    //         let expected = biguint_chip.assign_constant(pool.main(), expected_citizen_pubkey.clone()).unwrap();
-    //         let result =
-    //             slice_biguint(pool.main(), &biguint_chip, tbs_cert, PUBKEY_BEGINS, PUBKEY_BEGINS + RSA_KEY_SIZE);
-    //         let is_ok = biguint_chip.is_equal_fresh(pool.main(), &result, &expected).unwrap();
-    //         let one = pool.main().load_constant(Fr::one());
-    //         pool.main().constrain_equal(&is_ok, &one);
-    //     });
-    // }
-
-    // #[test]
-    // fn aaa() {
-    //     let two_pow_16 = Fr::from_raw([1 << 16, 0, 0, 0]);
-    //     let mut test_subject = Fr::from_raw([0, 0, 0, 1 << 46]);
-    //     while test_subject != Fr::zero() {
-    //         for j in 1..16 {
-    //             let k = test_subject * Fr::from_raw([1 << j, 0, 0, 0]);
-    //             if two_pow_16 >= k {
-    //                 unreachable!("i:{:?},j:{:?},k:{:?}", test_subject.to_repr(), j, k.to_repr());
-    //             }
-    //         }
-
-    //         test_subject += Fr::one();
-    //     }
-    // }
-
     #[test]
     fn mock() {
         let circuit =
             ProofOfJapaneseResidence::new("./certs/ca_cert.pem".into(), "./certs/myna_cert.pem".into(), 0xA42.into());
+        let instance_column = circuit.instance_column();
 
-        MockProver::run(
-            K as u32,
-            &circuit,
-            circuit
-                .halo2base
-                .assigned_instances
-                .iter()
-                .map(|public_column| public_column.into_iter().map(|public_cell| public_cell.value().clone()).collect())
-                .collect(),
-        )
-        .expect("The circuit generation failed")
-        .assert_satisfied();
+        MockProver::run(K as u32, &circuit, vec![instance_column])
+            .expect("The circuit generation failed")
+            .assert_satisfied();
     }
 }
