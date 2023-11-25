@@ -123,6 +123,8 @@ enum Commands {
         verify_cert_path: String,
         #[arg(short, long, default_value = "./build/verifier.sol")]
         solidity_path: String,
+        #[arg(short, long, default_value = "./build/calldata.txt")]
+        calldata_path: String,
         // nation's certificate
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
@@ -249,6 +251,7 @@ fn main() {
             issuer_cert_path,
             password,
             solidity_path,
+            calldata_path,
         } => {
             let circuit = circuit::ProofOfJapaneseResidence::new(
                 issuer_cert_path.into(),
@@ -276,15 +279,8 @@ fn main() {
                 Some(Path::new(&solidity_path)),
             );
 
-            println!("Size of the contract: {} bytes", deployment_code.len());
-            println!("Deploying contract...");
-
+            write_calldata(&[circuit.instance_column()], &proof, Path::new(&calldata_path)).unwrap();
             evm_verify(deployment_code, vec![circuit.instance_column()], proof.clone());
-
-            println!("Verification success!");
-
-            write_calldata(&[circuit.instance_column()], &proof, Path::new("./build/calldata.txt")).unwrap();
-            println!("Succesfully generate calldata!");
         }
     }
 }

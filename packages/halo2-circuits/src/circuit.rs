@@ -192,7 +192,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     fn params(&self) -> Self::Params {
         Self::Params {
             k: K,
-            num_advice_per_phase: vec![1],
+            num_advice_per_phase: vec![3],
             num_fixed: 1,
             num_lookup_advice_per_phase: vec![1, 0, 0],
             lookup_bits: Some(LOOKUP_BITS),
