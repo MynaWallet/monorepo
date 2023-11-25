@@ -19,6 +19,7 @@ use halo2_rsa::{
     AssignedBigUint, BigUintConfig, BigUintInstructions, Fresh, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey,
     RSASignature,
 };
+use halo2_sha256_unoptimized::Sha256Chip;
 use num_bigint::BigUint;
 use num_traits::One;
 use pse_poseidon::Poseidon;
@@ -43,7 +44,7 @@ pub struct PrivateInput {
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 17;
+pub const K: usize = 22;
 pub const LOOKUP_BITS: usize = K - 1;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
@@ -209,20 +210,18 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
-        dbg!(self.tbs_cert.len());
-
-        let mut assigned_blocks = Vec::new();
-        layouter.assign_region(
-            || "SHA256",
-            |mut region| {
-                assigned_blocks = config.sha256.multi_sha256(
-                    &mut region,
-                    vec![self.tbs_cert.clone()],
-                    Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS),
-                );
-                Ok(())
-            },
-        )?;
+        // let mut assigned_blocks = Vec::new();
+        // layouter.assign_region(
+        //     || "SHA256",
+        //     |mut region| {
+        //         assigned_blocks = config.sha256.multi_sha256(
+        //             &mut region,
+        //             vec![self.tbs_cert.clone()],
+        //             Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS),
+        //         );
+        //         Ok(())
+        //     },
+        // )?;
 
         // let mut final_block = None;
         // for (i, block) in assigned_blocks.iter().enumerate() {
@@ -241,28 +240,30 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
 
         // The final block appears in [20] because of the length of certs/myna_cert.pem.
         // TODO: Support pem with dynamic length.
-        let sha256out = &assigned_blocks[20].output();
+        // let sha256out = &assigned_blocks[20].output();
 
         let mut halo2base = BaseCircuitBuilder::new(false).use_params(self.params());
-        let (sha256lo, sha256hi) = {
-            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-            (lock.load_external_assigned(sha256out.lo()), lock.load_external_assigned(sha256out.hi()))
-        };
-        let tbs_cert_32s: Vec<AssignedValue<Fr>> = {
-            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-            assigned_blocks
-                .iter()
-                .flat_map(|assigned_block| {
-                    assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
-                })
-                .collect()
-        };
+        // let (sha256lo, sha256hi) = {
+        //     let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
+        //     (lock.load_external_assigned(sha256out.lo()), lock.load_external_assigned(sha256out.hi()))
+        // };
+        // let tbs_cert_32s: Vec<AssignedValue<Fr>> = {
+        //     let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
+        //     assigned_blocks
+        //         .iter()
+        //         .flat_map(|assigned_block| {
+        //             assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
+        //         })
+        //         .collect()
+        // };
 
         let range_chip = halo2base.range_chip();
         let ctx = halo2base.main(0);
 
         let biguint_chip: BigUintConfig<Fr> = BigUintConfig::construct(range_chip.clone(), LIMB_BITS);
         let rsa_chip = RSAConfig::construct(biguint_chip, RSA_KEY_SIZE, 5);
+        let mut sha256_chip: Sha256Chip<Fr> =
+            Sha256Chip::construct(vec![TBS_CERT_MAX_BITS / 8], range_chip.clone(), true);
         let mut poseidon = PoseidonHasher::new(OptimizedPoseidonSpec::<Fr, 3, 2>::new::<8, 57, 0>());
         poseidon.initialize_consts(ctx, rsa_chip.gate());
 
@@ -275,14 +276,30 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
         let nation_sig = rsa_chip.assign_signature(ctx, RSASignature::new(self.nation_sig.clone())).unwrap();
         let user_secret = ctx.load_witness(self.user_secret);
 
-        let sha256ed_64s = slice_bits(ctx, rsa_chip.range(), &[sha256lo, sha256hi], 128, 64, 0, 256);
+        let sha256ed = sha256_chip.digest(ctx, &self.tbs_cert, None).unwrap();
+        let sha256ed_64s = slice_bits(
+            ctx,
+            rsa_chip.range(),
+            &sha256ed.output_bytes.iter().rev().copied().collect::<Vec<_>>(),
+            8,
+            64,
+            0,
+            256,
+        );
         let is_nation_sig_valid =
             rsa_chip.verify_pkcs1v15_signature(ctx, &nation_pubkey, &sha256ed_64s, &nation_sig).unwrap();
         rsa_chip.biguint_config().gate().assert_is_const(ctx, &is_nation_sig_valid, &Fr::one());
 
         let mut identity_commitment_preimage = vec![user_secret];
-        let citizen_pubkey =
-            slice_bits(ctx, rsa_chip.range(), &tbs_cert_32s, 32, 253, PUBKEY_BEGINS, PUBKEY_BEGINS + RSA_KEY_SIZE);
+        let citizen_pubkey = slice_bits(
+            ctx,
+            rsa_chip.range(),
+            &sha256ed.input_bytes,
+            8,
+            253,
+            PUBKEY_BEGINS,
+            PUBKEY_BEGINS + RSA_KEY_SIZE,
+        );
         identity_commitment_preimage.extend(citizen_pubkey);
         let identity_commitment = poseidon.hash_fix_len_array(ctx, rsa_chip.gate(), &identity_commitment_preimage);
 

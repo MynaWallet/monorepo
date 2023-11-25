@@ -1327,6 +1327,7 @@ dependencies = [
  "halo2-base",
  "halo2-ecc",
  "halo2-rsa",
+ "halo2-sha256-unoptimized",
  "itertools 0.11.0",
  "num-bigint",
  "num-traits",
@@ -1373,6 +1374,26 @@ dependencies = [
  "num-traits",
  "rand",
  "rsa",
+ "sha2",
+]
+
+[[package]]
+name = "halo2-sha256-unoptimized"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "env_logger",
+ "generic-array",
+ "getrandom",
+ "halo2-base",
+ "hex",
+ "itertools 0.10.5",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "rayon",
+ "rsa",
+ "serde",
  "sha2",
 ]
 
