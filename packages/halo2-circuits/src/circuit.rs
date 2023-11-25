@@ -40,11 +40,11 @@ pub struct PrivateInput {
     pub password: Fr,
 }
 
-pub const LOOKUP_BITS: usize = 16;
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 20;
+pub const K: usize = 17;
+pub const LOOKUP_BITS: usize = K - 1;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
 const TBS_CERT_MAX_BITS: usize = 2048 * 8;
