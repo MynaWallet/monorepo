@@ -33,7 +33,7 @@ use std::{
     env,
     fmt::Binary,
     fs::{remove_file, File},
-    io::{Read, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -193,19 +193,21 @@ fn main() {
             .unwrap();
 
             let proof_file = File::create(proof_path).unwrap();
-            println!("Proof generation started at: {:?}", std::time::Instant::now());
-            let mut proof = Keccak256Write::<_, _, Challenge255<_>>::init(proof_file);
+
+            let started_at = std::time::Instant::now();
+            println!("Proof generation started at: {:?}", started_at);
+            let mut proof = Keccak256Write::<_, _, Challenge255<_>>::init(BufWriter::new(proof_file));
             create_proof::<
                 KZGCommitmentScheme<Bn256>,
                 ProverSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
                 _,
-                Keccak256Write<File, G1Affine, Challenge255<_>>,
+                Keccak256Write<BufWriter<File>, G1Affine, Challenge255<_>>,
                 _,
             >(&trusted_setup, &pk, &[circuit], &[&[&instance_column]], OsRng, &mut proof)
             .expect("prover should not fail");
             proof.finalize();
-            println!("Proof generation finished at: {:?}", std::time::Instant::now());
+            println!("Proof generation took: {:?}", started_at.elapsed());
         }
         Commands::Verify { trusted_setup_path, vk_path, proof_path, verify_cert_path, issuer_cert_path, password } => {
             let circuit = circuit::ProofOfJapaneseResidence::new(
@@ -271,7 +273,11 @@ fn main() {
             )
             .unwrap();
 
+            let started_at = std::time::Instant::now();
+            println!("Proof generation started at: {:?}", started_at);
             let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit.clone(), vec![circuit.instance_column()]);
+            println!("Proof generation took: {:?}", started_at.elapsed());
+
             let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
                 &trusted_setup,
                 &pk.get_vk(),
