@@ -43,7 +43,7 @@ pub struct PrivateInput {
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 17;
+pub const K: usize = 12;
 pub const LOOKUP_BITS: usize = K - 1;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
@@ -192,9 +192,9 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     fn params(&self) -> Self::Params {
         Self::Params {
             k: K,
-            num_advice_per_phase: vec![3],
+            num_advice_per_phase: vec![101],
             num_fixed: 1,
-            num_lookup_advice_per_phase: vec![1, 0, 0],
+            num_lookup_advice_per_phase: vec![6, 0, 0],
             lookup_bits: Some(LOOKUP_BITS),
             num_instance_columns: 1,
         }
@@ -288,6 +288,8 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
 
         halo2base.assigned_instances[0].extend(nation_pubkey.n.limbs().to_vec());
         halo2base.assigned_instances[0].push(identity_commitment);
+
+        dbg!(halo2base.calculate_params(None));
         halo2base.synthesize(config.halo2base, layouter).unwrap();
 
         Ok(())
