@@ -244,19 +244,17 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
         let sha256out = &assigned_blocks[20].output();
 
         let mut halo2base = BaseCircuitBuilder::new(false).use_params(self.params());
-        let (sha256lo, sha256hi) = {
-            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-            (lock.load_external_assigned(sha256out.lo()), lock.load_external_assigned(sha256out.hi()))
-        };
-        let tbs_cert_32s: Vec<AssignedValue<Fr>> = {
-            let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-            assigned_blocks
-                .iter()
-                .flat_map(|assigned_block| {
-                    assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
-                })
-                .collect()
-        };
+
+        let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
+        let sha256lo = lock.load_external_assigned(sha256out.lo());
+        let sha256hi = lock.load_external_assigned(sha256out.hi());
+        let tbs_cert_32s: Vec<AssignedValue<Fr>> = assigned_blocks
+            .iter()
+            .flat_map(|assigned_block| {
+                assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
+            })
+            .collect();
+        std::mem::drop(lock);
 
         let range_chip = halo2base.range_chip();
         let ctx = halo2base.main(0);
