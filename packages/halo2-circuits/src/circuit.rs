@@ -44,7 +44,7 @@ pub struct PrivateInput {
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 22;
+pub const K: usize = 23;
 pub const LOOKUP_BITS: usize = K - 1;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
@@ -193,7 +193,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     fn params(&self) -> Self::Params {
         Self::Params {
             k: K,
-            num_advice_per_phase: vec![3],
+            num_advice_per_phase: vec![1],
             num_fixed: 1,
             num_lookup_advice_per_phase: vec![1, 0, 0],
             lookup_bits: Some(LOOKUP_BITS),
