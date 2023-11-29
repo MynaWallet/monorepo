@@ -44,7 +44,7 @@ pub struct PrivateInput {
 const RSA_KEY_SIZE: usize = 2048;
 const PUBKEY_BEGINS: usize = 2216;
 const E: usize = 65537;
-pub const K: usize = 23;
+pub const K: usize = 24;
 pub const LOOKUP_BITS: usize = K - 1;
 const LIMB_BITS: usize = 64;
 const SHA256_BLOCK_BITS: usize = 512;
@@ -167,7 +167,6 @@ pub fn slice_bits(
 #[derive(Debug, Clone)]
 pub struct Config {
     halo2base: BaseConfig<Fr>,
-    sha256: Sha256CircuitConfig<Fr>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,7 +201,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn configure_with_params(meta: &mut ConstraintSystem<Fr>, params: BaseCircuitParams) -> Self::Config {
-        Self::Config { halo2base: BaseConfig::configure(meta, params), sha256: Sha256CircuitConfig::new(meta) }
+        Self::Config { halo2base: BaseConfig::configure(meta, params) }
     }
 
     fn configure(_: &mut ConstraintSystem<Fr>) -> Self::Config {
@@ -210,53 +209,7 @@ impl Circuit<Fr> for ProofOfJapaneseResidence {
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
-        // let mut assigned_blocks = Vec::new();
-        // layouter.assign_region(
-        //     || "SHA256",
-        //     |mut region| {
-        //         assigned_blocks = config.sha256.multi_sha256(
-        //             &mut region,
-        //             vec![self.tbs_cert.clone()],
-        //             Some(TBS_CERT_MAX_BITS / SHA256_BLOCK_BITS),
-        //         );
-        //         Ok(())
-        //     },
-        // )?;
-
-        // let mut final_block = None;
-        // for (i, block) in assigned_blocks.iter().enumerate() {
-        //     block.is_final().value().map(|is_final| {
-        //         if Fr::zero() < is_final.evaluate() {
-        //             final_block = Some(block);
-        //         }
-        //     });
-
-        //     // if let Some(_) = final_block {
-        //     //     dbg!(i);
-        //     //     break;
-        //     // }
-        // }
-        // let final_block = final_block.expect("zkevm-hashes failed to generate a SHA256 hash");
-
-        // The final block appears in [20] because of the length of certs/myna_cert.pem.
-        // TODO: Support pem with dynamic length.
-        // let sha256out = &assigned_blocks[20].output();
-
         let mut halo2base = BaseCircuitBuilder::new(false).use_params(self.params());
-        // let (sha256lo, sha256hi) = {
-        //     let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-        //     (lock.load_external_assigned(sha256out.lo()), lock.load_external_assigned(sha256out.hi()))
-        // };
-        // let tbs_cert_32s: Vec<AssignedValue<Fr>> = {
-        //     let mut lock = halo2base.core_mut().copy_manager.lock().unwrap();
-        //     assigned_blocks
-        //         .iter()
-        //         .flat_map(|assigned_block| {
-        //             assigned_block.word_values().clone().map(|cell| lock.load_external_assigned(cell))
-        //         })
-        //         .collect()
-        // };
-
         let range_chip = halo2base.range_chip();
         let ctx = halo2base.main(0);
 
