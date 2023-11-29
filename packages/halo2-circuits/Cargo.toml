@@ -11,30 +11,17 @@ num-bigint = { version = "0.4", features = ["rand"] }
 sha2 = "0.10.6"
 rand = "0.8.5"
 rsa = { version = "0.6.1", features = ["serde"] }
-halo2-rsa = { default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], path = "../../../halo2-rsa" }
-halo2-base = { default-features = false, features = [
-    "halo2-axiom",
-    "display",
-    "test-utils",
-], path = "../../../halo2-lib/halo2-base" }
-halo2-ecc = { default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], path = "../../../halo2-lib/halo2-ecc" }
-zkevm-hashes = { default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], path = "../../../halo2-lib/hashes/zkevm" }
+halo2-rsa = { git = "https://github.com/MynaWallet/halo2-rsa.git" }
+halo2-base = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
+halo2-ecc = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
+zkevm-hashes = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
 snark-verifier-sdk = { default-features = false, features = [
     "halo2-axiom",
     "display",
     "loader_evm",
     "loader_halo2",
     "revm"
-], path = "../../../snark-verifier/snark-verifier-sdk" }
+], git = "https://github.com/MynaWallet/snark-verifier.git", branch = "release-0.1.6-rc0" }
 x509-parser = { version = "0.15", features = ["verify"] }
 openssl = "0.10"
 num-traits = "0.2.15"
@@ -52,7 +39,7 @@ tokio = { version = "1.16", features = [
     "macros",
 ] }
 pse-poseidon = { git = "https://github.com/axiom-crypto/pse-poseidon.git" }
-halo2-sha256-unoptimized = { path = "../../../halo2-sha256-unoptimized" }
+halo2-sha256-unoptimized = { git = "https://github.com/MynaWallet/halo2-sha256-unoptimized.git" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -69,6 +56,3 @@ default = ["halo2-axiom", "display"]
 display = ["halo2-base/display"]
 halo2-pse = ["halo2-base/halo2-pse"]
 halo2-axiom = ["halo2-base/halo2-axiom"]
-
-[workspace]
-resolver = "2"
