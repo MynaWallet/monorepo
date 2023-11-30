@@ -33,7 +33,7 @@ use std::{
     env,
     fmt::Binary,
     fs::{remove_file, File},
-    io::{Read, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -142,7 +142,7 @@ fn main() {
                 println!("Trusted setup already exists. Overwriting...");
             }
 
-            let mut file = File::create(trusted_setup_path).expect("Failed to create a trusted setup");
+            let mut file = BufWriter::new(File::create(trusted_setup_path).expect("Failed to create a trusted setup"));
             let trusted_setup_file = ParamsKZG::<Bn256>::setup(circuit::K as u32, OsRng);
             trusted_setup_file.write(&mut file).expect("Failed to write a trusted setup");
         }
@@ -165,11 +165,11 @@ fn main() {
                 .expect("The trusted setup is corrupted");
 
             let vk = keygen_vk(&trusted_setup, &circuit).unwrap();
-            let mut vk_file = File::create(vk_path).unwrap();
+            let mut vk_file = BufWriter::new(File::create(vk_path).unwrap());
             vk.write(&mut vk_file, SerdeFormat::RawBytes).unwrap();
 
             let pk = keygen_pk(&trusted_setup, vk, &circuit).unwrap();
-            let mut pk_file = File::create(pk_path).unwrap();
+            let mut pk_file = BufWriter::new(File::create(pk_path).unwrap());
             pk.write(&mut pk_file, SerdeFormat::RawBytes).unwrap();
         }
         Commands::Prove { verify_cert_path, issuer_cert_path, password, trusted_setup_path, pk_path, proof_path } => {
@@ -192,7 +192,7 @@ fn main() {
             )
             .unwrap();
 
-            let proof_file = File::create(proof_path).unwrap();
+            let proof_file = BufWriter::new(File::create(proof_path).unwrap());
             println!("Proof generation started at: {:?}", std::time::Instant::now());
             let mut proof = Keccak256Write::<_, _, Challenge255<_>>::init(proof_file);
             create_proof::<
@@ -200,7 +200,7 @@ fn main() {
                 ProverSHPLONK<'_, Bn256>,
                 Challenge255<G1Affine>,
                 _,
-                Keccak256Write<File, G1Affine, Challenge255<_>>,
+                Keccak256Write<BufWriter<File>, G1Affine, Challenge255<_>>,
                 _,
             >(&trusted_setup, &pk, &[circuit], &[&[&instance_column]], OsRng, &mut proof)
             .expect("prover should not fail");
