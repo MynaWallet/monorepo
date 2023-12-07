@@ -8,7 +8,7 @@ use halo2_base::{
         arithmetic::Field,
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::bn256::Fr,
-        plonk::{Assignment, Circuit, ConstraintSystem, Error},
+        plonk::{Assignment, Circuit, ConstraintSystem, Error, Selector},
     },
     poseidon::hasher::{spec::OptimizedPoseidonSpec, PoseidonHasher},
     utils::halo2::Halo2AssignedCell,
@@ -22,6 +22,7 @@ use halo2_rsa::{
 use num_bigint::BigUint;
 use num_traits::One;
 use pse_poseidon::Poseidon;
+use snark_verifier_sdk::CircuitExt;
 use std::{cmp::Ordering, path::PathBuf};
 use zkevm_hashes::sha256::vanilla::{columns::Sha256CircuitConfig, param::NUM_WORDS_TO_ABSORB};
 
@@ -317,6 +318,27 @@ impl ProofOfJapaneseResidence {
         instance_column.push(identity_commitment);
 
         instance_column
+    }
+}
+
+impl CircuitExt<Fr> for ProofOfJapaneseResidence {
+    /// Return the number of instances of the circuit.
+    /// This may depend on extra circuit parameters but NOT on private witnesses.
+    fn num_instance(&self) -> Vec<usize> {
+        vec![self.instance_column().len()]
+    }
+
+    fn instances(&self) -> Vec<Vec<Fr>> {
+        vec![self.instance_column()]
+    }
+
+    fn accumulator_indices() -> Option<Vec<(usize, usize)>> {
+        None
+    }
+
+    /// Output the simple selector columns (before selector compression) of the circuit
+    fn selectors(config: &Self::Config) -> Vec<Selector> {
+        config.halo2base.gate().basic_gates[0].iter().map(|basic| basic.q_enable).collect()
     }
 }
 
