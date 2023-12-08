@@ -58,22 +58,32 @@ You can refer to these repos of RSA verification circuits.
 - [zkCert](https://github.com/zkCert/halo2-zkcert)
 
 ## Example Usage
-
-
+### Create the directory where proofs are stored
 ```bash
-# `k`: degree that expresses the size of circuit (i.e., 2^k is the number of rows in the circuit)
-cargo run -r gen-params --k 17
+mkdir -p build/{app,agg}
 ```
 
+### Generate the common reference string
 ```bash
-cargo run -r gen-rsa-keys # generate pk
+cargo run trusted-setup
 ```
 
+### Generate pk & vk
 ```bash
-cargo run -r prove-rsa # verify rsa locally
+cargo run app keys
 ```
 
-You need to install solc 0.8.19 or 0.8.20 locally.
+### Generate a proof
 ```bash
-cargo run -r gen-rsa-verify-evm-proof  # generate a verifier contract and proof inputs for evm 
+cargo run app prove
+```
+
+### Run the verification code written in Rust
+```bash
+cargo run app verify
+```
+
+### Run the verification code written in Solidity
+```bash
+cargo run app evm
 ```
