@@ -1,23 +1,5 @@
-use halo2_base::{
-    gates::{circuit::builder::BaseCircuitBuilder, GateInstructions},
-    halo2_proofs::halo2curves::bn256::Fr,
-    utils::fs::gen_srs,
-    AssignedValue,
-    QuantumCell::{Constant, Existing},
-};
-use halo2_rsa::{BigUintConfig, BigUintInstructions, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
-// use snark_verifir_sdk::{gen_pk, halo2::gen_snark_shplonk, Snark};
-
-use itertools::Itertools;
 use num_bigint::BigUint;
-use openssl::ssl::{SslConnector, SslMethod};
-use sha2::{Digest, Sha256};
-use std::{
-    fs::File,
-    io::{Read, Write},
-    net::TcpStream,
-    vec,
-};
+use std::{fs::File, io::Read};
 use x509_parser::{pem::parse_x509_pem, public_key::PublicKey};
 
 pub fn read_nation_cert(cert_path: &str) -> BigUint {
@@ -52,7 +34,6 @@ pub fn read_citizen_cert(cert_path: &str) -> (BigUint, BigUint, BigUint) {
 
     // Extract the TBS (To-Be-Signed) data from the certificate
     let tbs_bytes = cert.tbs_certificate.as_ref();
-    dbg!(tbs_bytes.len());
     let tbs_biguint = BigUint::from_bytes_le(tbs_bytes);
     // println!("TBS (To-Be-Signed): {:x?}", tbs);
 

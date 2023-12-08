@@ -2263,6 +2263,7 @@ dependencies = [
 name = "halo2-circuits"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "clap 4.2.1",
  "console_error_panic_hook",
  "criterion",

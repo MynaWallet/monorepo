@@ -57,15 +57,16 @@ You can refer to these repos of RSA verification circuits.
 - [zk-email-verify](https://github.com/zkemail/zk-email-verify)
 - [zkCert](https://github.com/zkCert/halo2-zkcert)
 
-## Example Usage
+# Usage
+## For off-chain verification
 ### Create the directory where proofs are stored
 ```bash
-mkdir -p build/{app,agg}
+mkdir -p build/app
 ```
 
 ### Generate the common reference string
 ```bash
-cargo run trusted-setup
+cargo run app trusted-setup
 ```
 
 ### Generate pk & vk
@@ -84,6 +85,41 @@ cargo run app verify
 ```
 
 ### Run the verification code written in Solidity
+This fails because of the big proof size.
 ```bash
 cargo run app evm
+```
+
+## For on-chain verification
+Run `cargo run app keys` first.
+
+### Create the directory where proofs are stored
+```bash
+mkdir -p build/agg
+```
+
+### Generate a proof that's ready to be aggregated
+```bash
+cargo run app snark
+```
+
+### Generate pk & vk
+```bash
+cargo run agg keys
+```
+
+### Generate a proof
+```bash
+cargo run agg prove
+```
+
+### Run the verification code written in Rust
+```bash
+cargo run agg verify
+```
+
+### Run the verification code written in Solidity
+This succeeds because of the tiny proof size.
+```bash
+cargo run agg evm
 ```

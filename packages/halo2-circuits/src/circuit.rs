@@ -5,26 +5,20 @@ use halo2_base::{
         GateInstructions, RangeChip, RangeInstructions,
     },
     halo2_proofs::{
-        arithmetic::Field,
         circuit::{Layouter, SimpleFloorPlanner},
         halo2curves::bn256::Fr,
-        plonk::{Assignment, Circuit, ConstraintSystem, Error, Selector},
+        plonk::{Circuit, ConstraintSystem, Error, Selector},
     },
     poseidon::hasher::{spec::OptimizedPoseidonSpec, PoseidonHasher},
-    utils::halo2::Halo2AssignedCell,
     AssignedValue, Context, QuantumCell,
 };
-use halo2_ecc::bigint::OverflowInteger;
-use halo2_rsa::{
-    AssignedBigUint, BigUintConfig, BigUintInstructions, Fresh, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey,
-    RSASignature,
-};
+use halo2_rsa::{BigUintConfig, BigUintInstructions, RSAConfig, RSAInstructions, RSAPubE, RSAPublicKey, RSASignature};
 use num_bigint::BigUint;
 use num_traits::One;
 use pse_poseidon::Poseidon;
 use snark_verifier_sdk::CircuitExt;
-use std::{cmp::Ordering, path::PathBuf};
-use zkevm_hashes::sha256::vanilla::{columns::Sha256CircuitConfig, param::NUM_WORDS_TO_ABSORB};
+use std::path::PathBuf;
+use zkevm_hashes::sha256::vanilla::columns::Sha256CircuitConfig;
 
 #[derive(Debug, Clone)]
 pub struct PublicInput {
@@ -345,13 +339,7 @@ impl CircuitExt<Fr> for ProofOfJapaneseResidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::helpers::{read_citizen_cert, read_nation_cert};
-    use halo2_base::{
-        halo2_proofs::{dev::MockProver, halo2curves::ff::PrimeField},
-        utils::testing::base_test,
-    };
-    use num_traits::cast::ToPrimitive;
-    use sha2::Sha256;
+    use halo2_base::halo2_proofs::dev::MockProver;
 
     #[test]
     fn mock() {
