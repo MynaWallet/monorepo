@@ -23,7 +23,6 @@ template FpPow65537Mod(n, k) {
             doublers[i].p[j] <== modulus[j];
         }
     }
-    var cnt = 1;
     for (var j = 0; j < k; j++) {
         doublers[0].a[j] <== base[j];
         doublers[0].b[j] <== base[j];
@@ -152,8 +151,6 @@ template RSAVerify65537(n, k) {
     // By construction of the padding, the padded message is necessarily
     // smaller than the modulus. Thus, we don't have to check that bigPow is fully reduced.
     for (var i = 0; i < k; i++) {
-        // log(bigPow.out[i]);
-        // log(padder.padded_message[i]);
         bigPow.out[i] === padder.padded_message[i];
     }
 }
