@@ -15,6 +15,7 @@ library ZKAccountStorage {
         bytes32 zkOwner;
         /// @notice buffer(gap)
         uint256[50] gap0;
+        bool verified;
     }
 
     // TODO session key storage

@@ -2,6 +2,8 @@ pragma circom 2.1.5;
 
 include "../../../node_modules/circomlib/circuits/poseidon.circom";
 include "./helpers/rsa.circom";
+include "../../../node_modules/circomlib/circuits/bitify.circom";
+include "../../../node_modules/circomlib/circuits/sha256/sha256.circom";
 
 // Create a public hashed value from user secret and modulus
 template CalculateHash(k) {
@@ -20,7 +22,7 @@ template CalculateHash(k) {
     signal output out <== poseidon2.out;
 }
 
-template MynaWalletVerify(n, k) {
+template MynaVerifyUserSig(n, k) {
     assert(n * k > 2048); // constraints for 2048 bit RSA
     assert(n < (255 \ 2)); // we want a multiplication to fit into a circom signal
 
@@ -42,13 +44,11 @@ template MynaWalletVerify(n, k) {
         rsa.base_message[i] <== 0;
     }
 
-    // VERIFY MODULUS IS INCLUDED IN TBS CERT
-
-    // TODO VERIFY RSA SIGNATURE FROM GOVERNMENT
-
-    // CALCULATE NULLIFIER:
+    // CALsCULATE NULLIFIER:
     component calculateHash = CalculateHash(k);
     calculateHash.modulus <== modulus;
     calculateHash.userSecret <== userSecret;
     signal output hashed <== calculateHash.out; // poseidon(modulus, userSecret);
 }
+
+component main { public [ sha256HashedMessage ] } = MynaVerifyUserSig(121, 17);

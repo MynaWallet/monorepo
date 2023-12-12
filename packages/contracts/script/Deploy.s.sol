@@ -30,9 +30,7 @@ contract DeployFactory is Script {
 
         address entryPointAddress = vm.envAddress("ENTRY_POINT_ADDRESS");
 
-        MynaWalletFactory factory = new MynaWalletFactory(
-            IEntryPoint(entryPointAddress)
-        );
+        MynaWalletFactory factory = new MynaWalletFactory(IEntryPoint(entryPointAddress));
         console.log("Deployed factory at: ", address(factory));
         vm.stopBroadcast();
     }
@@ -44,8 +42,7 @@ contract DeployPaymaster is Script {
     function run() public {
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
         MynaWalletPaymaster paymaster = new MynaWalletPaymaster(
-            IEntryPoint(vm.envAddress("ENTRY_POINT_ADDRESS")),
-            vm.envAddress("PAYMASTER_OWNER_ADDRESS")
+            IEntryPoint(vm.envAddress("ENTRY_POINT_ADDRESS")), vm.envAddress("PAYMASTER_OWNER_ADDRESS")
         );
         console.log("Deployed paymaster at: ", address(paymaster));
         vm.stopBroadcast();
@@ -59,13 +56,15 @@ contract DeployZKFactory is Script {
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 
         address entryPointAddress = vm.envAddress("ENTRY_POINT_ADDRESS");
-        address verifierAddress = vm.envAddress("VERIFIER_ADDRESS");
+        address govSigVerifierAddress = vm.envAddress("GOV_SIG_VERIFIER_ADDRESS");
+        address userSigVerifierAddress = vm.envAddress("USER_SIG_VERIFIER_ADDRESS");
 
         // MynaWalletVerifier verifier = new MynaWalletVerifier();
 
         ZKMynaWalletFactory factory = new ZKMynaWalletFactory(
             IEntryPoint(entryPointAddress),
-            IMynaWalletVerifier(verifierAddress)
+            IMynaGovSigVerifier(govSigVerifierAddress),
+            IMynaUserSigVerifier(userSigVerifierAddress)
         );
         console.log("Deployed factory at: ", address(factory));
         vm.stopBroadcast();

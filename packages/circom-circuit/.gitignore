@@ -1,0 +1,17 @@
+build/
+setup/
+certs/
+powersOfTau*
+user-sig-setup/circuit*
+user-sig-setup/witness.wtns
+user-sig-setup/proof.json
+user-sig-setup/public.json
+user-sig-setup/verification_key.json
+user-sig-build/*
+gov-sig-setup/circuit*
+gov-sig-setup/witness.wtns
+gov-sig-setup/proof.json
+gov-sig-setup/public.json
+gov-sig-setup/verification_key.json
+gov-sig-setup/input.json
+gov-sig-build/*

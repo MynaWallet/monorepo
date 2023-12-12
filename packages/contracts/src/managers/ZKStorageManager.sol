@@ -8,9 +8,10 @@ import "@auth/ZKOwnerAuth.sol";
 /// @title ZKOwnerManager contract
 /// @author a42x
 /// @notice You can use this contract for owner manager
-abstract contract ZKOwnerManager is ZKOwnerAuth {
+abstract contract ZKStorageManager is ZKOwnerAuth {
     /// @notice Emitted when the owner is changed
     event OwnerChanged(bytes32 newOwner, bytes32 oldOwner);
+    event Verified(bool verified);
 
     /**
      * Get owner
@@ -48,5 +49,17 @@ abstract contract ZKOwnerManager is ZKOwnerAuth {
      */
     function _isOwner(bytes32 identityCommitment) internal view override returns (bool) {
         return ZKAccountStorage.layout().zkOwner == identityCommitment;
+    }
+
+    function isVerified() public view returns (bool) {
+        return ZKAccountStorage.layout().verified;
+    }
+
+    function _setVerified() internal {
+        if (ZKAccountStorage.layout().verified) {
+            revert();
+        }
+        ZKAccountStorage.layout().verified = true;
+        emit Verified(true);
     }
 }

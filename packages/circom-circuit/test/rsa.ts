@@ -22,9 +22,11 @@ function bigint_to_array(n: number, k: number, x: bigint) {
 
   let ret: bigint[] = [];
   var x_temp: bigint = x;
+  console.log("x_temp original: ", x_temp);
   for (var idx = 0; idx < k; idx++) {
     ret.push(x_temp % mod);
     x_temp = x_temp / mod;
+    console.log("x_temp every time: ", x_temp);
   }
   return ret;
 }

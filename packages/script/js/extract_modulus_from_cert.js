@@ -16,4 +16,4 @@ const base64String = pem
 const der = Buffer.from(base64String, 'base64')
 
 // The modulus
-console.log(`0x${der.slice(276 + 5, 276 + 5 + 256).toString('hex')}`)
+console.log(`0x${der.slice(1329, 1329 + 256).toString('hex')}`)

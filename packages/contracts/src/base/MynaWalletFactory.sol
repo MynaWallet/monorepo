@@ -39,8 +39,7 @@ contract MynaWalletFactory {
         mynaWallet = MynaWallet(
             payable(
                 new ERC1967Proxy{salt: bytes32(salt)}(
-                    address(accountImplementation),
-                    abi.encodeCall(MynaWallet.initialize, (modulus))
+                    address(accountImplementation), abi.encodeCall(MynaWallet.initialize, (modulus))
                 )
             )
         );
