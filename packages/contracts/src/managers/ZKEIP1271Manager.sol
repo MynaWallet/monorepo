@@ -21,7 +21,7 @@ abstract contract ZKEIP1271Manager is ZKAuth, ZKStorageManager {
      * @param signature Signature of the data
      * @return magicValue Magic value if the signature is valid or invalid id / invalid time range
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4 magicValue) {
+    function isValidSignature(bytes32 hash, bytes calldata signature) external pure returns (bytes4 magicValue) {
         // todo
         (hash, signature);
         return _INVALID_ID;
@@ -36,7 +36,7 @@ abstract contract ZKEIP1271Manager is ZKAuth, ZKStorageManager {
      */
     function _isValidSignature(bytes32 hash, bytes calldata signature)
         internal
-        view
+        pure
         returns (uint256 validationData, bool isValid)
     {
         // todo
