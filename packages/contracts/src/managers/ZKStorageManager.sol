@@ -62,5 +62,4 @@ abstract contract ZKStorageManager is ZKOwnerAuth {
         ZKAccountStorage.layout().verified = true;
         emit Verified(true);
     }
-
 }

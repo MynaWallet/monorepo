@@ -5,10 +5,11 @@ import "@openzeppelin/contracts/utils/Create2.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {ZKMynaWallet} from "./ZKMynaWallet.sol";
-import { IMynaGovSigVerifier, IMynaUserSigVerifier } from "@interfaces/IMynaWalletVerifier.sol";
+import {IMynaGovSigVerifier, IMynaUserSigVerifier} from "@interfaces/IMynaWalletVerifier.sol";
 /**
  * Factory contract for MynaWallet.
  */
+
 contract ZKMynaWalletFactory {
     ZKMynaWallet public immutable accountImplementation;
 
@@ -17,7 +18,11 @@ contract ZKMynaWalletFactory {
      * @dev Cusntuctor is only used when factory is deployed and the facotry holds wallet implementation address which is immutable
      * @param _entryPoint EntryPoint contract address that can operate this contract
      */
-    constructor(IEntryPoint _entryPoint, IMynaGovSigVerifier newGovSigVerifier, IMynaUserSigVerifier newUserSigVerifier) {
+    constructor(
+        IEntryPoint _entryPoint,
+        IMynaGovSigVerifier newGovSigVerifier,
+        IMynaUserSigVerifier newUserSigVerifier
+    ) {
         accountImplementation = new ZKMynaWallet(_entryPoint, newGovSigVerifier, newUserSigVerifier);
     }
 
@@ -39,8 +44,7 @@ contract ZKMynaWalletFactory {
         mynaWallet = ZKMynaWallet(
             payable(
                 new ERC1967Proxy{salt: bytes32(salt)}(
-                    address(accountImplementation),
-                    abi.encodeCall(ZKMynaWallet.initialize, (identityCommitment))
+                    address(accountImplementation), abi.encodeCall(ZKMynaWallet.initialize, (identityCommitment))
                 )
             )
         );

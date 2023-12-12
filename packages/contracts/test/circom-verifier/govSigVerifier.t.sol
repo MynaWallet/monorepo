@@ -12,11 +12,11 @@ contract MynaGovSigVerifierTest is Test {
     }
 
     function test_Success() public {
-        uint[2] memory pA = [
+        uint256[2] memory pA = [
             0x2ad86e80f5088acbb9c210cdc26e265ad9d9c3e515b2cf1c718e57b8b3548b03,
             0x204d4674ec339c8eb0d62a21789434a7357ca13e03680f481473c8423c81c84d
         ];
-        uint[2][2] memory pB = [
+        uint256[2][2] memory pB = [
             [
                 0x172d25b29113fc034a1694f7ee465ffcc05c727c372e5e606905248fbb93f447,
                 0x26956d109bec2ddb20a40d189c053ecb95db9efaa3c822ddee2683f11c072da2
@@ -26,11 +26,11 @@ contract MynaGovSigVerifierTest is Test {
                 0x28861b62ceb33a0bde830472b3b4012cecc93dba8a1a89894d5641f63184601a
             ]
         ];
-        uint[2] memory pC = [
+        uint256[2] memory pC = [
             0x26d24f4665feca1d03461adf5928ab25612fb645b9c59d76b393b402729f0b03,
             0x03a1ca6224c6537bf729ac6087821bf9ceea3b4aa94a0ca04039c479e148d01a
         ];
-        uint[35] memory pubSignals = [
+        uint256[35] memory pubSignals = [
             0x1bfdeb68d2cb034ee48ec29340ff2ed6f738f6d22e764e3ac003cd9938b02488,
             0x0000000000000000000000000000000001ca4350eadda8587ec0d5edbfa1f853,
             0x00000000000000000000000000000000017b17fedf34f0ed646607f6aeae7814,

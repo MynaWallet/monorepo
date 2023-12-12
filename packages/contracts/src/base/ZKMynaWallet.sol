@@ -10,7 +10,7 @@ import "@managers/ZKStorageManager.sol";
 import "@managers/EntryPointManager.sol";
 import "@managers/ZKEIP1271Manager.sol";
 import {Errors} from "@libraries/Errors.sol";
-import { IMynaGovSigVerifier, IMynaUserSigVerifier } from "@interfaces/IMynaWalletVerifier.sol";
+import {IMynaGovSigVerifier, IMynaUserSigVerifier} from "@interfaces/IMynaWalletVerifier.sol";
 
 /// @title MynaWallet
 /// @author a42x
@@ -44,7 +44,11 @@ contract ZKMynaWallet is
      * @dev Cusntuctor is only used when factory is deployed and the facotry holds wallet implementation address
      * @param newEntryPoint EntryPoint contract address that can operate this contract
      */
-    constructor(IEntryPoint newEntryPoint, IMynaGovSigVerifier newGovSigVerifier, IMynaUserSigVerifier newUserSigVerifier) EntryPointManager(newEntryPoint) {
+    constructor(
+        IEntryPoint newEntryPoint,
+        IMynaGovSigVerifier newGovSigVerifier,
+        IMynaUserSigVerifier newUserSigVerifier
+    ) EntryPointManager(newEntryPoint) {
         // verifier = newVerifier; // Todo move this logic to manager
         govSigVerifier = newGovSigVerifier;
         userSigVerifier = newUserSigVerifier;
@@ -142,12 +146,13 @@ contract ZKMynaWallet is
     }
 
     // TODO: Check modulus preimage
-    function validateGovSignature(bytes32[43] memory proof) 
-        public
-        onlySelf()
-    {
-        (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[SIGNALS_NUM_FOR_GOV_SIG] memory _pubSignals) =
-            _splitToGovSigProof(proof);
+    function validateGovSignature(bytes32[43] memory proof) public onlySelf {
+        (
+            uint256[2] memory _pA,
+            uint256[2][2] memory _pB,
+            uint256[2] memory _pC,
+            uint256[SIGNALS_NUM_FOR_GOV_SIG] memory _pubSignals
+        ) = _splitToGovSigProof(proof);
 
         try govSigVerifier.verifyProof(_pA, _pB, _pC, _pubSignals) returns (bool valid) {
             if (valid) {
@@ -176,8 +181,12 @@ contract ZKMynaWallet is
         if (userOp.signature.length != (SIGNALS_NUM_FOR_USER_SIG + 8) * 32) {
             return 1;
         }
-        (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[SIGNALS_NUM_FOR_USER_SIG] memory _pubSignals) =
-            _splitToProof(userOp.signature);
+        (
+            uint256[2] memory _pA,
+            uint256[2][2] memory _pB,
+            uint256[2] memory _pC,
+            uint256[SIGNALS_NUM_FOR_USER_SIG] memory _pubSignals
+        ) = _splitToProof(userOp.signature);
         bytes32 userOpHashInPublicSignals = _concatBytes([_pubSignals[1], _pubSignals[2], _pubSignals[3]]);
         bytes32 hashed = sha256(abi.encode(userOpHash));
 
@@ -225,7 +234,12 @@ contract ZKMynaWallet is
     function _splitToGovSigProof(bytes32[43] memory proof)
         internal
         pure
-        returns (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[SIGNALS_NUM_FOR_GOV_SIG] memory _pubSignals)
+        returns (
+            uint256[2] memory _pA,
+            uint256[2][2] memory _pB,
+            uint256[2] memory _pC,
+            uint256[SIGNALS_NUM_FOR_GOV_SIG] memory _pubSignals
+        )
     {
         // Populating the outputs
         _pA[0] = uint256(proof[0]);
@@ -255,7 +269,12 @@ contract ZKMynaWallet is
     function _splitToProof(bytes memory signature)
         internal
         pure
-        returns (uint256[2] memory _pA, uint256[2][2] memory _pB, uint256[2] memory _pC, uint256[SIGNALS_NUM_FOR_USER_SIG] memory _pubSignals)
+        returns (
+            uint256[2] memory _pA,
+            uint256[2][2] memory _pB,
+            uint256[2] memory _pC,
+            uint256[SIGNALS_NUM_FOR_USER_SIG] memory _pubSignals
+        )
     {
         bytes32[SIGNALS_NUM_FOR_USER_SIG + 8] memory proof;
 

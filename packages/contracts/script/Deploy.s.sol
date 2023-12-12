@@ -30,9 +30,7 @@ contract DeployFactory is Script {
 
         address entryPointAddress = vm.envAddress("ENTRY_POINT_ADDRESS");
 
-        MynaWalletFactory factory = new MynaWalletFactory(
-            IEntryPoint(entryPointAddress)
-        );
+        MynaWalletFactory factory = new MynaWalletFactory(IEntryPoint(entryPointAddress));
         console.log("Deployed factory at: ", address(factory));
         vm.stopBroadcast();
     }
@@ -44,8 +42,7 @@ contract DeployPaymaster is Script {
     function run() public {
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
         MynaWalletPaymaster paymaster = new MynaWalletPaymaster(
-            IEntryPoint(vm.envAddress("ENTRY_POINT_ADDRESS")),
-            vm.envAddress("PAYMASTER_OWNER_ADDRESS")
+            IEntryPoint(vm.envAddress("ENTRY_POINT_ADDRESS")), vm.envAddress("PAYMASTER_OWNER_ADDRESS")
         );
         console.log("Deployed paymaster at: ", address(paymaster));
         vm.stopBroadcast();
