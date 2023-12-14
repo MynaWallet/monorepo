@@ -57,23 +57,69 @@ You can refer to these repos of RSA verification circuits.
 - [zk-email-verify](https://github.com/zkemail/zk-email-verify)
 - [zkCert](https://github.com/zkCert/halo2-zkcert)
 
-## Example Usage
-
-
+# Usage
+## For off-chain verification
+### Create the directory where proofs are stored
 ```bash
-# `k`: degree that expresses the size of circuit (i.e., 2^k is the number of rows in the circuit)
-cargo run -r gen-params --k 17
+mkdir -p build/app
 ```
 
+### Generate the common reference string
 ```bash
-cargo run -r gen-rsa-keys # generate pk
+cargo run app trusted-setup
 ```
 
+### Generate pk & vk
 ```bash
-cargo run -r prove-rsa # verify rsa locally
+cargo run app keys
 ```
 
-You need to install solc 0.8.19 or 0.8.20 locally.
+### Generate a proof
 ```bash
-cargo run -r gen-rsa-verify-evm-proof  # generate a verifier contract and proof inputs for evm 
+cargo run app prove
+```
+
+### Run the verification code written in Rust
+```bash
+cargo run app verify
+```
+
+### Run the verification code written in Solidity
+This fails because of the big proof size.
+```bash
+cargo run app evm
+```
+
+## For on-chain verification
+Run `cargo run app keys` first.
+
+### Create the directory where proofs are stored
+```bash
+mkdir -p build/agg
+```
+
+### Generate a proof that's ready to be aggregated
+```bash
+cargo run app snark
+```
+
+### Generate pk & vk
+```bash
+cargo run agg keys
+```
+
+### Generate a proof
+```bash
+cargo run agg prove
+```
+
+### Run the verification code written in Rust
+```bash
+cargo run agg verify
+```
+
+### Run the verification code written in Solidity
+This succeeds because of the tiny proof size.
+```bash
+cargo run agg evm
 ```

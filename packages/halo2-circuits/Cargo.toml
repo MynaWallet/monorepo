@@ -2,7 +2,7 @@
 name = "halo2-circuits"
 version = "0.1.0"
 edition = "2021"
-authors = ["hiroism007"]
+authors = ["hiroism007", "chokermaxx"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,29 +11,17 @@ num-bigint = { version = "0.4", features = ["rand"] }
 sha2 = "0.10.6"
 rand = "0.8.5"
 rsa = { version = "0.6.1", features = ["serde"] }
-halo2-rsa = { branch = "main", default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], git = "https://github.com/MynaWallet/halo2-rsa.git" }
-halo2-base = { branch = "community-edition", default-features = false, features = [
-    "halo2-axiom",
-    "display",
-    "test-utils",
-], git = "https://github.com/axiom-crypto/halo2-lib.git" }
-zkevm-hashes = { branch = "feat/zkevm-sha256", default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], git = "https://github.com/axiom-crypto/halo2-lib.git" }
-halo2-sha256-unoptimized = { branch = "main", default-features = false, features = [
-    "halo2-axiom",
-    "display",
-], git = "https://github.com/zkpdf/halo2-sha256-unoptimized.git" }
-snark-verifier-sdk = { branch = "community-edition", default-features = false, features = [
+halo2-rsa = { git = "https://github.com/MynaWallet/halo2-rsa.git" }
+halo2-base = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
+halo2-ecc = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
+zkevm-hashes = { git = "https://github.com/MynaWallet/halo2-lib.git", branch = "sha256" }
+snark-verifier-sdk = { default-features = false, features = [
     "halo2-axiom",
     "display",
     "loader_evm",
     "loader_halo2",
-], git = "https://github.com/axiom-crypto/snark-verifier.git" }
+    "revm"
+], git = "https://github.com/MynaWallet/snark-verifier.git", branch = "release-0.1.6-rc0" }
 x509-parser = { version = "0.15", features = ["verify"] }
 openssl = "0.10"
 num-traits = "0.2.15"
@@ -50,6 +38,9 @@ tokio = { version = "1.16", features = [
     "rt-multi-thread",
     "macros",
 ] }
+pse-poseidon = { git = "https://github.com/axiom-crypto/pse-poseidon.git" }
+halo2-sha256-unoptimized = { git = "https://github.com/MynaWallet/halo2-sha256-unoptimized.git" }
+bincode = "1"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
