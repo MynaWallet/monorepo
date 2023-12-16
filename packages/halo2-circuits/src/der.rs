@@ -7,6 +7,9 @@ use halo2_proofs::{
 };
 use zkevm_gadgets::util::*;
 
+// DER type tag.
+const OCTET_STRING: u8 = 0x04;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     // The DER we're parsing. each cell corresponds to a byte.
@@ -25,9 +28,9 @@ pub struct Config {
     pub last_type: Column<Advice>,
     pub parsed_bytes: Column<Advice>,
     pub parsed_objects: Column<Advice>,
+    pub is_primitive: Column<Advice>,
     pub primitive_types: TableColumn,
     pub composite_types: TableColumn,
-    pub is_primitive: Column<Advice>,
     // 0..256
     pub byte: TableColumn,
     pub is_below_128: Column<Advice>,
@@ -65,9 +68,9 @@ impl plonk::Circuit<Fr> for Circuit {
             last_type: meta.advice_column(),
             parsed_bytes: meta.advice_column(),
             parsed_objects: meta.advice_column(),
+            is_primitive: meta.advice_column(),
             primitive_types: meta.lookup_table_column(),
             composite_types: meta.lookup_table_column(),
-            is_primitive: meta.advice_column(),
             byte: meta.lookup_table_column(),
             is_below_128: meta.advice_column(),
             public_objects: meta.instance_column(),
@@ -104,24 +107,26 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![(der_byte, config.byte)]
         });
 
-        meta.lookup("last_type <= 0b11111111", |region| {
+        meta.lookup("0 < last_type <= 0b11111111", |region| {
             let last_type = region.query_advice(config.last_type, Rotation::cur());
-            vec![(last_type, config.byte)]
+            let minus1 = last_type.clone() - Expression::Constant(Fr::one());
+            vec![(last_type, config.byte), (minus1, config.byte)]
         });
 
-        meta.lookup("last_type <= 0b11111 if is_primitive is 1", |region| {
+        // assumption here is that last_type will never be 0.
+        // If last_type became 0 both lookup would succeed,
+        // and there would be no constraint on whether is_primitive should be 0 or 1.
+        meta.lookup("last_type must be in primitive_types if is_primitive is 1", |region| {
+            let last_type = region.query_advice(config.last_type, Rotation::cur());
             let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            let last_type = region.query_advice(config.last_type, Rotation::cur());
-            let shifted = last_type * Expression::Constant(Fr::from(1 << 3));
-            vec![(is_primitive * shifted, config.byte)]
+            vec![(is_primitive * last_type, config.primitive_types)]
         });
 
-        meta.lookup("0b100000 <= last_type <= 0b111111 if is_primitive is 0", |region| {
+        meta.lookup("last_type must be in composite_types if is_primitive is 0", |region| {
+            let last_type = region.query_advice(config.last_type, Rotation::cur());
             let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
             let is_composite = Expression::Constant(Fr::one()) - is_primitive;
-            let last_type = region.query_advice(config.last_type, Rotation::cur());
-            let shifted = last_type * Expression::Constant(Fr::from(1 << 3)) - Expression::Constant(Fr::from(1 << 8));
-            vec![(is_composite * shifted, config.byte)]
+            vec![(is_composite * last_type, config.composite_types)]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
@@ -139,6 +144,9 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![(is_above_128 * shifted, config.byte)]
         });
 
+        // assumption here is that parsed_objects will never be 0.
+        // If parsed_objects became 0 both lookup would succeed,
+        // and there would be no constraint on whether should_disclose should be 0 or 1.
         meta.lookup_any("parsed_objects must be in public_objects if should_disclose is 1", |region| {
             let parsed_objects = region.query_advice(config.parsed_objects, Rotation::cur());
             let public_objects = region.query_instance(config.public_objects, Rotation::cur());
@@ -161,9 +169,13 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_region(
             || "DerChip",
             |mut region| {
-                // Assign der_byte.
                 for (i, der_byte) in self.der_bytes.iter().copied().enumerate() {
-                    region.assign_advice(|| "aa", config.der_byte, i, || Value::known(Fr::from(der_byte as u64)))?;
+                    region.assign_advice(
+                        || "Assign each byte of the DER as a cell",
+                        config.der_byte,
+                        i,
+                        || Value::known(Fr::from(der_byte as u64)),
+                    )?;
                 }
 
                 Ok(())
@@ -174,28 +186,30 @@ impl plonk::Circuit<Fr> for Circuit {
             || "DerChip",
             |mut table| {
                 for row_index in 0..(1 << Self::K) {
-                    // Assign byte table.
                     let row_value = row_index & 0b11111111;
                     table.assign_cell(
-                        || "DerChip",
+                        || "List of all possible bytes",
                         config.byte,
                         row_index,
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    // Assign primitive types.
-                    let row_value = row_index & 0b11111;
+                    let row_value =
+                        if row_index == OCTET_STRING as usize || (1 << 5) <= row_index { 0 } else { row_index };
                     table.assign_cell(
-                        || "DerChip",
+                        || "List of type tags for primitive types",
                         config.primitive_types,
                         row_index,
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    // Assign composite types.
-                    let row_value = 0b100000 + (row_index & 0b11111);
+                    let row_value = if row_index == OCTET_STRING as usize || (1 << 5) > row_index {
+                        OCTET_STRING as usize
+                    } else {
+                        row_index
+                    };
                     table.assign_cell(
-                        || "DerChip",
+                        || "List of type tags for composite types",
                         config.composite_types,
                         row_index,
                         || Value::known(Fr::from(row_value as u64)),
