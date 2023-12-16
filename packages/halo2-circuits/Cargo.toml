@@ -41,6 +41,8 @@ tokio = { version = "1.16", features = [
 pse-poseidon = { git = "https://github.com/axiom-crypto/pse-poseidon.git" }
 halo2-sha256-unoptimized = { git = "https://github.com/MynaWallet/halo2-sha256-unoptimized.git" }
 bincode = "1"
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20" }
+zkevm-gadgets = { git = "https://github.com/privacy-scaling-explorations/zkevm-circuits", rev = "610acc2", package = "gadgets" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
