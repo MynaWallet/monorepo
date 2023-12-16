@@ -79,7 +79,7 @@ impl plonk::Circuit<Fr> for Circuit {
             disclosure: meta.instance_column(),
         };
 
-        meta.create_gate("DerChip", |gate| {
+        meta.create_gate("Selector columns must be either 0 or 1", |gate| {
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
@@ -87,18 +87,26 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                // is_type must be either 0 or 1.
                 is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
-                // is_length must be either 0 or 1.
                 is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
-                // is_payload must be either 0 or 1.
                 is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                // is_primitive must be either 0 or 1.
                 is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
-                // is_below_128 must be either 0 or 1.
                 is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
-                // should_disclose must be either 0 or 1.
                 should_disclose.clone() * (should_disclose.clone() - Expression::Constant(Fr::one())),
+            ]
+        });
+
+        meta.create_gate("Either one of is_type, is_length, is_payload must be turned on", |gate| {
+            let is_type = gate.query_advice(config.is_type, Rotation::cur());
+            let is_length = gate.query_advice(config.is_length, Rotation::cur());
+            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
+            vec![
+                is_type.clone() * not::expr(is_length.clone()),
+                is_type.clone() * not::expr(is_payload.clone()),
+                is_length.clone() * not::expr(is_type.clone()),
+                is_length.clone() * not::expr(is_payload.clone()),
+                is_payload.clone() * not::expr(is_type.clone()),
+                is_payload.clone() * not::expr(is_length.clone()),
             ]
         });
 
