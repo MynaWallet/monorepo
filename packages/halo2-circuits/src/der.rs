@@ -1,14 +1,116 @@
-use crate::helpers::{read_citizen_cert, read_nation_cert};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     halo2curves::bn256::Fr,
-    plonk::{self, Advice, Assigned, Column, ConstraintSystem, Error, Expression, Fixed, Instance, TableColumn},
+    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, TableColumn},
     poly::Rotation,
 };
 use zkevm_gadgets::util::*;
 
 // DER type tag.
 const OCTET_STRING: u8 = 0x04;
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum Action {
+    Parse(u8),
+    DoNothing,
+}
+
+impl Action {
+    fn der_byte(self) -> u64 {
+        if let Action::Parse(byte) = self { byte as u64 } else { 1u64 << 8 }
+    }
+
+    fn is_below_128(self) -> bool {
+        match self {
+            Self::Parse(der_byte) => der_byte < 128,
+            Self::DoNothing => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum ByteKind {
+    Type,
+    Length,
+    Payload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+struct State {
+    header_size: u32,
+    payload_size: u32,
+    parsed_bytes: u32,
+    parsed_objects: u32,
+    type_tag: u8,
+    byte_kind: ByteKind,
+}
+
+impl State {
+    fn new() -> State {
+        State {
+            header_size: 0,
+            payload_size: 0,
+            parsed_bytes: 0,
+            parsed_objects: 0,
+            type_tag: 0,
+            byte_kind: ByteKind::Type,
+        }
+    }
+
+    fn is_type(self) -> bool {
+        self.byte_kind == ByteKind::Type
+    }
+
+    fn is_length(self) -> bool {
+        self.byte_kind == ByteKind::Length
+    }
+
+    fn is_payload(self) -> bool {
+        self.byte_kind == ByteKind::Payload
+    }
+
+    fn is_primitive(self) -> bool {
+        self.type_tag < 1 << 5 && self.type_tag != OCTET_STRING
+    }
+
+    fn update(self, action: Action) -> State {
+        let mut new_state = self.clone();
+        new_state.parsed_bytes += 1;
+
+        if self.byte_kind == ByteKind::Type {
+            new_state.byte_kind = ByteKind::Length;
+            new_state.type_tag = match action {
+                Action::Parse(byte) => byte,
+                Action::DoNothing => 0,
+            };
+            new_state.parsed_bytes = 1;
+            new_state.header_size = 2;
+            new_state.payload_size = 0;
+            new_state.parsed_objects += 1;
+        } else if self.byte_kind == ByteKind::Length && self.parsed_bytes == self.header_size - 1 {
+            new_state.byte_kind = ByteKind::Payload;
+        } else if self.byte_kind == ByteKind::Payload && self.parsed_bytes == self.header_size + self.payload_size - 1 {
+            new_state.byte_kind = ByteKind::Type;
+        };
+
+        if let Action::Parse(byte) = action {
+            if self.byte_kind == ByteKind::Length {
+                if self.parsed_bytes == 1 {
+                    if action.is_below_128() {
+                        new_state.payload_size = byte as u32;
+                    } else {
+                        new_state.header_size = (byte - (1 << 7) + 2) as u32;
+                    }
+                } else {
+                    new_state.payload_size *= 1u32 << 8;
+                    new_state.payload_size += byte as u32;
+                }
+            }
+        }
+
+        new_state
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -44,6 +146,7 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub struct Circuit {
     der_bytes: Vec<u8>,
+    public_objects: Vec<u32>,
 }
 
 impl Circuit {
@@ -114,24 +217,28 @@ impl plonk::Circuit<Fr> for Circuit {
             ]
         });
 
-        meta.create_gate("We can't turn the parser down unless der_byte tells so", |gate| {
-            let is_type = gate.query_advice(config.is_type, Rotation::cur());
-            let is_length = gate.query_advice(config.is_length, Rotation::cur());
-            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
-            vec![
-                is_type.clone() * is_length.clone(),
-                is_type.clone() * is_payload.clone(),
-                is_length.clone() * is_type.clone(),
-                is_length.clone() * is_payload.clone(),
-                is_payload.clone() * is_type.clone(),
-                is_payload.clone() * is_length.clone(),
-            ]
+        meta.lookup("der_byte <= 0b11111111 if either one of is_type, is_length, is_payload is turned on", |region| {
+            let is_type = region.query_advice(config.is_type, Rotation::cur());
+            let is_length = region.query_advice(config.is_length, Rotation::cur());
+            let is_payload = region.query_advice(config.is_payload, Rotation::cur());
+            let der_byte = region.query_advice(config.der_byte, Rotation::cur());
+            vec![(or::expr([is_type, is_length, is_payload]) * der_byte, config.byte)]
         });
 
-        meta.lookup("der_byte <= 0b11111111", |region| {
-            let der_byte = region.query_advice(config.der_byte, Rotation::cur());
-            vec![(der_byte, config.byte)]
-        });
+        meta.lookup(
+            "der_byte's 9th bit must be turned on if none of is_type, is_length, is_payload is turned on",
+            |region| {
+                let is_type = region.query_advice(config.is_type, Rotation::cur());
+                let is_length = region.query_advice(config.is_length, Rotation::cur());
+                let is_payload = region.query_advice(config.is_payload, Rotation::cur());
+                let der_byte = region.query_advice(config.der_byte, Rotation::cur());
+                vec![(
+                    and::expr([not::expr(is_type), not::expr(is_length), not::expr(is_payload)])
+                        * (der_byte - Expression::Constant(Fr::from(1 << 8))),
+                    config.byte,
+                )]
+            },
+        );
 
         meta.lookup("type_tag <= 0b11111111", |region| {
             let type_tag = region.query_advice(config.type_tag, Rotation::cur());
@@ -238,7 +345,7 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.create_gate("Constrain value of registers", |region| {
-            let disclosure_cur = region.query_instance(config.disclosure, Rotation::next());
+            let disclosure_next = region.query_instance(config.disclosure, Rotation::next());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
             let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
@@ -315,7 +422,7 @@ impl plonk::Circuit<Fr> for Circuit {
                             payload_size_cur.clone(),
                         ),
                     ),
-                disclosure_cur.clone()
+                disclosure_next.clone()
                     - select::expr(
                         // If we should disclose the byte
                         and::expr([should_disclose_cur.clone(), is_payload_cur.clone()]),
@@ -334,49 +441,165 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_region(
             || "DerChip",
             |mut region| {
-                for (i, der_byte) in self.der_bytes.iter().copied().enumerate() {
-                    region.assign_advice(
-                        || "Assign each byte of the DER as a cell",
-                        config.der_byte,
-                        i,
-                        || Value::known(Fr::from(der_byte as u64)),
-                    )?;
-                }
+                // Assign initial state
+                let mut state = State::new();
                 region.assign_advice_from_constant(
-                    || "The first op must be PARSE_TYPE",
+                    || "Assign is_type",
                     config.is_type,
                     0,
-                    Assigned::Trivial(Fr::one()),
+                    Fr::from(state.is_type()),
                 )?;
                 region.assign_advice_from_constant(
-                    || "The first parsed_objects must be 0",
-                    config.parsed_objects,
+                    || "Assign is_length",
+                    config.is_length,
                     0,
-                    Assigned::Trivial(Fr::zero()),
+                    Fr::from(state.is_length()),
                 )?;
                 region.assign_advice_from_constant(
-                    || "The first parsed_bytes must be 0",
-                    config.parsed_bytes,
+                    || "Assign is_payload",
+                    config.is_payload,
                     0,
-                    Assigned::Trivial(Fr::zero()),
+                    Fr::from(state.is_payload()),
                 )?;
                 region.assign_advice_from_constant(
-                    || "The first header_size must be 2",
+                    || "Assign header_size",
                     config.header_size,
                     0,
-                    Assigned::Trivial(Fr::from(2)),
+                    Fr::from(state.header_size as u64),
                 )?;
                 region.assign_advice_from_constant(
-                    || "The first payload_size must be 0",
+                    || "Assign payload_size",
                     config.payload_size,
                     0,
-                    Assigned::Trivial(Fr::from(0)),
+                    Fr::from(state.payload_size as u64),
                 )?;
                 region.assign_advice_from_constant(
-                    || "The first type_tag must be OCTET_STRING",
-                    config.payload_size,
+                    || "Assign parsed_bytes",
+                    config.parsed_bytes,
                     0,
-                    Assigned::Trivial(Fr::from(OCTET_STRING as u64)),
+                    Fr::from(state.parsed_bytes as u64),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign parsed_objects",
+                    config.parsed_objects,
+                    0,
+                    Fr::from(state.parsed_objects as u64),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign type_tag",
+                    config.type_tag,
+                    0,
+                    Fr::from(state.type_tag as u64),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign is_primitive",
+                    config.is_primitive,
+                    0,
+                    Fr::from(state.is_primitive()),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign should_disclose",
+                    config.should_disclose,
+                    0,
+                    Fr::from(self.should_disclose(state.parsed_objects)),
+                )?;
+
+                for row_index in 1..(1 << Self::K) {
+                    // Assign action
+                    let action = if let Some(byte) = self.der_bytes.get(row_index) {
+                        Action::Parse(*byte)
+                    } else {
+                        Action::DoNothing
+                    };
+                    region.assign_advice(
+                        || "Assign der_byte",
+                        config.der_byte,
+                        row_index - 1,
+                        || Value::known(Fr::from(action.der_byte())),
+                    )?;
+                    region.assign_advice(
+                        || "Assign is_below_128",
+                        config.is_below_128,
+                        row_index - 1,
+                        || Value::known(Fr::from(action.is_below_128())),
+                    )?;
+
+                    // Assign new state
+                    state = state.update(action);
+                    region.assign_advice(
+                        || "Assign is_type",
+                        config.is_type,
+                        row_index,
+                        || Value::known(Fr::from(state.is_type())),
+                    )?;
+                    region.assign_advice(
+                        || "Assign is_length",
+                        config.is_length,
+                        row_index,
+                        || Value::known(Fr::from(state.is_length())),
+                    )?;
+                    region.assign_advice(
+                        || "Assign is_payload",
+                        config.is_payload,
+                        row_index,
+                        || Value::known(Fr::from(state.is_payload())),
+                    )?;
+                    region.assign_advice(
+                        || "Assign header_size",
+                        config.header_size,
+                        row_index,
+                        || Value::known(Fr::from(state.header_size as u64)),
+                    )?;
+                    region.assign_advice(
+                        || "Assign payload_size",
+                        config.payload_size,
+                        row_index,
+                        || Value::known(Fr::from(state.payload_size as u64)),
+                    )?;
+                    region.assign_advice(
+                        || "Assign parsed_bytes",
+                        config.parsed_bytes,
+                        row_index,
+                        || Value::known(Fr::from(state.parsed_bytes as u64)),
+                    )?;
+                    region.assign_advice(
+                        || "Assign parsed_objects",
+                        config.parsed_objects,
+                        row_index,
+                        || Value::known(Fr::from(state.parsed_objects as u64)),
+                    )?;
+                    region.assign_advice(
+                        || "Assign type_tag",
+                        config.type_tag,
+                        row_index,
+                        || Value::known(Fr::from(state.type_tag as u64)),
+                    )?;
+                    region.assign_advice(
+                        || "Assign is_primitive",
+                        config.is_primitive,
+                        row_index,
+                        || Value::known(Fr::from(state.is_primitive())),
+                    )?;
+                    region.assign_advice(
+                        || "Assign should_disclose",
+                        config.should_disclose,
+                        row_index,
+                        || Value::known(Fr::from(self.should_disclose(state.parsed_objects))),
+                    )?;
+                }
+
+                // Assign the last action.
+                region.assign_advice_from_constant(
+                    || "Assign der_byte",
+                    config.der_byte,
+                    (1 << Self::K) - 1,
+                    Fr::from(Action::DoNothing.der_byte()),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign is_below_128",
+                    config.is_below_128,
+                    (1 << Self::K) - 1,
+                    Fr::from(Action::DoNothing.is_below_128()),
                 )?;
 
                 Ok(())
@@ -396,7 +619,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     )?;
 
                     let row_value =
-                        if row_index == OCTET_STRING as usize || (1 << 5) <= row_index { 0 } else { row_index };
+                        if row_index == OCTET_STRING as usize || row_index >= 1 << 5 { 0 } else { row_index };
                     table.assign_cell(
                         || "List of type tags for primitive types",
                         config.primitive_types,
@@ -404,7 +627,7 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value = if row_index == OCTET_STRING as usize || (1 << 5) > row_index {
+                    let row_value = if row_index == OCTET_STRING as usize || row_index < 1 << 5 {
                         OCTET_STRING as usize
                     } else {
                         row_index
@@ -422,5 +645,11 @@ impl plonk::Circuit<Fr> for Circuit {
         )?;
 
         Ok(())
+    }
+}
+
+impl Circuit {
+    fn should_disclose(&self, parsed_objects: u32) -> bool {
+        self.public_objects.contains(&parsed_objects)
     }
 }
