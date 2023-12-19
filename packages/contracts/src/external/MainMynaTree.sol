@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@zk-kit/imt.sol/internal/InternalBinaryIMT.sol";
+import "@zk-kit/imt.sol/contracts/internal/InternalBinaryIMT.sol";
 import "../interfaces/IMainMynaRegistrationVerifier.sol";
 import "../interfaces/IMainMynaInclusionVerifier.sol";
 
