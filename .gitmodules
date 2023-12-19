@@ -1,0 +1,3 @@
+[submodule "packages/contracts/lib/zk-kit"]
+	path = packages/contracts/lib/zk-kit
+	url = https://github.com/privacy-scaling-explorations/zk-kit
