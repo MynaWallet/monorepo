@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
-import {MynaGovSigVerifier} from "../../src/circom-verifier/govSigVerifier.sol";
+import {MynaGovSigVerifier} from "../../src/circomVerifier/GovSigVerifier.sol";
 
 contract MynaGovSigVerifierTest is Test {
     MynaGovSigVerifier public verifier;

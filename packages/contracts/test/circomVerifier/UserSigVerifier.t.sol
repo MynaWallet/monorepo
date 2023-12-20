@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
-import {MynaUserSigVerifier} from "../../src/circom-verifier/userSigVerifier.sol";
+import {MynaUserSigVerifier} from "../../src/circomVerifier/UserSigVerifier.sol";
 
 contract MynaUserSigVerifierTest is Test {
     MynaUserSigVerifier public verifier;
