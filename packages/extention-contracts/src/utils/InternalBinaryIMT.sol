@@ -113,7 +113,7 @@ library InternalBinaryIMT {
 
         self.depth = depth;
 
-        for (uint8 i = 0; i < depth; ) {
+        for (uint8 i = 0; i < depth;) {
             self.zeroes[i] = zero;
             zero = PoseidonT3.hash([zero, zero]);
 
@@ -152,7 +152,7 @@ library InternalBinaryIMT {
         uint256 hash = leaf;
         bool useDefaultZeroes = self.useDefaultZeroes;
 
-        for (uint8 i = 0; i < depth; ) {
+        for (uint8 i = 0; i < depth;) {
             if (index & 1 == 0) {
                 self.lastSubtrees[i] = [hash, useDefaultZeroes ? _defaultZero(i) : self.zeroes[i]];
             } else {
@@ -197,7 +197,7 @@ library InternalBinaryIMT {
         uint256 hash = newLeaf;
         uint256 updateIndex;
 
-        for (uint8 i = 0; i < depth; ) {
+        for (uint8 i = 0; i < depth;) {
             updateIndex |= uint256(proofPathIndices[i]) << uint256(i);
 
             if (proofPathIndices[i] == 0) {
@@ -262,7 +262,7 @@ library InternalBinaryIMT {
 
         uint256 hash = leaf;
 
-        for (uint8 i = 0; i < depth; ) {
+        for (uint8 i = 0; i < depth;) {
             if (proofSiblings[i] >= SNARK_SCALAR_FIELD) {
                 revert ValueGreaterThanSnarkScalarField();
             } else if (proofPathIndices[i] != 1 && proofPathIndices[i] != 0) {
