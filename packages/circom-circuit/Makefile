@@ -87,16 +87,16 @@ verify-user-sig-proof:
 	snarkjs groth16 verify ./setup/user_sig/verification_key.json ./setup/user_sig/public.json ./setup/user_sig/proof.json
 
 export-main-registration-verifier:
-	snarkjs zkey export solidityverifier ./setup/main_myna_registration/circuit_final.zkey ../contracts/src/circomVerifier/MainMynaRegistraionVerifier.sol
+	snarkjs zkey export solidityverifier ./setup/main_myna_registration/circuit_final.zkey ../extention-contracts/src/circom-verifier/MainMynaRegistraionVerifier.sol
 
 export-main-inclusion-verifier:
-	snarkjs zkey export solidityverifier ./setup/main_myna_inclusion/circuit_final.zkey ../contracts/src/circomVerifier/MainMynaInclusionVerifier.sol
+	snarkjs zkey export solidityverifier ./setup/main_myna_inclusion/circuit_final.zkey ../extention-contracts/src/circom-verifier/MainMynaInclusionVerifier.sol
 
 export-gov-sig-verifier:
-	snarkjs zkey export solidityverifier ./setup/gov_sig/circuit_final.zkey ../contracts/src/circomVerifier/GovSigVerifier.sol
+	snarkjs zkey export solidityverifier ./setup/gov_sig/circuit_final.zkey ../contracts/src/circom-verifier/GovSigVerifier.sol
 
 export-user-sig-verifier:
-	snarkjs zkey export solidityverifier ./setup/user_sig/circuit_final.zkey ../contracts/src/circomVerifier/UserSigVerifier.sol
+	snarkjs zkey export solidityverifier ./setup/user_sig/circuit_final.zkey ../contracts/src/circom-verifier/UserSigVerifier.sol
 
 generate-main-registration-calldata:
 	snarkjs generatecall ./setup/main_myna_registration/public.json ./setup/main_myna_registration/proof.json >> ./build/main_myna_registration/solidity_input.json

@@ -1,66 +1,39 @@
-## Foundry
-
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
-
-Foundry consists of:
-
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
 ### Test
 
-```shell
-$ forge test
+```bash
+forge test
 ```
 
-### Format
+#### with printing execution traces for failing tests
 
-```shell
-$ forge fmt
+```bash
+forge test -vvv
 ```
 
-### Gas Snapshots
+#### with gas reporting
 
-```shell
-$ forge snapshot
+```bash
+forge test --gas-report
 ```
 
-### Anvil
+## Deployment
 
-```shell
-$ anvil
+By executing the script below, you can deploy the Factory Contract of MynaWallet. You can change the network to which you deploy by changing `rpc-url` and `etherscan-api-key`.
+
+### Inclusion Verifier
+
+```bash
+forge script script/Deploy.s.sol:DeployMainMynaInclusionVerifier --broadcast --rpc-url ${SEPOLIA_RPC_URL} --verify --etherscan-api-key ${ETHER_SCAN_API_KEY}
 ```
 
-### Deploy
+### Registration Verifier
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+```bash
+forge script script/Deploy.s.sol:DeployMainMynaRegistrationVerifier --broadcast --rpc-url ${SEPOLIA_RPC_URL} --verify --etherscan-api-key ${ETHER_SCAN_API_KEY}
 ```
 
-### Cast
+### Main Tree
 
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+```bash
+forge script script/Deploy.s.sol:DeployMainMynaTree --broadcast --rpc-url ${SEPOLIA_RPC_URL} --verify --etherscan-api-key ${ETHER_SCAN_API_KEY}
 ```

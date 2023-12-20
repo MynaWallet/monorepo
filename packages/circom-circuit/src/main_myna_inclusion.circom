@@ -42,8 +42,8 @@ template MainMynaInclusion(nLevels, k) {
     hashModulus2.inputs[1] <== modulus[k - 1];
 
     component poseidon = Poseidon(2);
-    poseidon.inputs[0] <== hashUserSecret.out;
-    poseidon.inputs[1] <== hashModulus2.out;
+    poseidon.inputs[0] <== hashModulus2.out;
+    poseidon.inputs[1] <== hashUserSecret.out;
 
     signal leaf <== poseidon.out;
 
