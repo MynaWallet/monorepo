@@ -12,3 +12,4 @@ openzeppelin/=lib/openzeppelin-contracts/contracts/
 @interfaces/=src/interfaces/
 @auth/=src/auth/
 @zk-kit/=lib/zk-kit/packages/
+@poseidon-solidity/=lib/poseidon-solidity/contracts/

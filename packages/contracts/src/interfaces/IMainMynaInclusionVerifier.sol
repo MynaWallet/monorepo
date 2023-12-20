@@ -7,5 +7,5 @@ interface IMainMynaInclusionVerifier {
         uint[2][2] calldata _pB, 
         uint[2] calldata _pC, 
         uint[2] calldata _pubSignals
-    ) public view returns (bool);
+    ) external view returns (bool);
 }
