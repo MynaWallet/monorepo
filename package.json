@@ -10,7 +10,8 @@
   },
   "workspaces": [
     "packages/circom-circuits",
-    "packages/contracts",
+    "packages/base-contracts",
+    "packages/extention-contracts",
     "packages/halo2-circuits",
     "packages/script"
   ],

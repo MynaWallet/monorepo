@@ -1,5 +1,5 @@
 /// SPDX-License-Identifier: MIT
-pragma solidity >=0.7.0;
+pragma solidity ^0.8.19;
 
 library PoseidonT3 {
   uint constant M00 = 0x109b7f411ba0e4c9b2b70caf5c36a7b194be7c11ad24378bfedb68592ba8118b;
