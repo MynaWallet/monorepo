@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     halo2curves::bn256::Fr,
-    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, TableColumn},
+    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector, TableColumn},
     poly::Rotation,
 };
 use zkevm_gadgets::util::*;
@@ -116,6 +116,7 @@ impl State {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub is_enabled: Selector,
     // The DER we're parsing. each cell corresponds to a byte.
     pub der_byte: Column<Advice>,
     // 1 if the byte we're parsing is in a position where the type tag should be.
@@ -165,6 +166,7 @@ impl plonk::Circuit<Fr> for Circuit {
 
     fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let config = Self::Config {
+            is_enabled: meta.selector(),
             der_byte: meta.advice_column(),
             is_type: meta.advice_column(),
             is_length: meta.advice_column(),
@@ -189,6 +191,7 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.constants);
 
         meta.create_gate("Selector columns must be either 0 or 1", |gate| {
+            let is_enabled = gate.query_selector(config.is_enabled);
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
@@ -196,86 +199,83 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
-                is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
-                is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
-                is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
-                should_disclose.clone() * (should_disclose.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * (is_enabled.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone()
+                    * should_disclose.clone()
+                    * (should_disclose.clone() - Expression::Constant(Fr::one())),
             ]
         });
 
         meta.create_gate("Either one of is_type, is_length, is_payload must be turned on", |gate| {
+            let is_enabled = gate.query_selector(config.is_enabled);
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
             vec![
-                is_type.clone() * is_length.clone(),
-                is_type.clone() * is_payload.clone(),
-                is_length.clone() * is_type.clone(),
-                is_length.clone() * is_payload.clone(),
-                is_payload.clone() * is_type.clone(),
-                is_payload.clone() * is_length.clone(),
+                is_enabled.clone() * is_type.clone() * is_length.clone(),
+                is_enabled.clone() * is_type.clone() * is_payload.clone(),
+                is_enabled.clone() * is_length.clone() * is_type.clone(),
+                is_enabled.clone() * is_length.clone() * is_payload.clone(),
+                is_enabled.clone() * is_payload.clone() * is_type.clone(),
+                is_enabled.clone() * is_payload.clone() * is_length.clone(),
+                is_enabled.clone() * is_type.clone() * is_length.clone() * is_payload.clone(),
             ]
         });
 
-        meta.lookup("der_byte <= 0b11111111 if either one of is_type, is_length, is_payload is turned on", |region| {
-            let is_type = region.query_advice(config.is_type, Rotation::cur());
-            let is_length = region.query_advice(config.is_length, Rotation::cur());
-            let is_payload = region.query_advice(config.is_payload, Rotation::cur());
+        meta.lookup("der_byte <= 0b11111111", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
-            vec![(or::expr([is_type, is_length, is_payload]) * der_byte, config.byte)]
+            vec![(is_enabled * der_byte, config.byte)]
         });
 
-        meta.lookup(
-            "der_byte's 9th bit must be turned on if none of is_type, is_length, is_payload is turned on",
-            |region| {
-                let is_type = region.query_advice(config.is_type, Rotation::cur());
-                let is_length = region.query_advice(config.is_length, Rotation::cur());
-                let is_payload = region.query_advice(config.is_payload, Rotation::cur());
-                let der_byte = region.query_advice(config.der_byte, Rotation::cur());
-                vec![(
-                    and::expr([not::expr(is_type), not::expr(is_length), not::expr(is_payload)])
-                        * (der_byte - Expression::Constant(Fr::from(1 << 8))),
-                    config.byte,
-                )]
-            },
-        );
-
         meta.lookup("type_tag <= 0b11111111", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let type_tag = region.query_advice(config.type_tag, Rotation::cur());
-            vec![(type_tag, config.byte)]
+            vec![(is_enabled * type_tag, config.byte)]
         });
 
         meta.lookup("type_tag must be in primitive_types if is_primitive is 1", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let type_tag = region.query_advice(config.type_tag, Rotation::cur());
             let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            vec![(is_primitive * type_tag, config.primitive_types)]
-        }); // 0 is in primitive_types so this lookup suceeds if is_primitive = 0
+            vec![(is_enabled * is_primitive * type_tag, config.primitive_types)]
+        }); // 0 is in primitive_types so this lookup succeeds if is_primitive = 0
 
         meta.lookup("type_tag must be in composite_types if is_primitive is 0", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let type_tag = region.query_advice(config.type_tag, Rotation::cur());
             let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
             let is_composite = Expression::Constant(Fr::one()) - is_primitive;
             vec![(
-                select::expr(is_composite, type_tag, Expression::Constant(Fr::from(OCTET_STRING as u64))),
+                select::expr(
+                    and::expr([is_enabled, is_composite]),
+                    type_tag,
+                    Expression::Constant(Fr::from(OCTET_STRING as u64)),
+                ),
                 config.composite_types,
             )]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let is_below_128 = region.query_advice(config.is_below_128, Rotation::cur());
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
             let shifted = der_byte * Expression::Constant(Fr::from(1 << 1));
-            vec![(is_below_128 * shifted, config.byte)]
+            vec![(is_enabled * is_below_128 * shifted, config.byte)]
         });
 
         meta.lookup("der_byte > 0b1111111 if is_below_128 is 0", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let is_below_128 = region.query_advice(config.is_below_128, Rotation::cur());
             let is_above_128 = Expression::Constant(Fr::one()) - is_below_128;
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
             let shifted = der_byte - Expression::Constant(Fr::from(1 << 7));
-            vec![(is_above_128 * shifted, config.byte)]
+            vec![(is_enabled * is_above_128 * shifted, config.byte)]
         });
 
         // assumption here is that parsed_objects will never be 0.
@@ -285,21 +285,24 @@ impl plonk::Circuit<Fr> for Circuit {
         // The case of the first row is fine because is_payload is also constrained to be 0.
         // If is_payload = 0 no byte will be disclosed anyway.
         meta.lookup_any("parsed_objects must be in public_objects if should_disclose is 1", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let parsed_objects = region.query_advice(config.parsed_objects, Rotation::cur());
             let public_objects = region.query_instance(config.public_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
-            vec![(should_disclose * parsed_objects, public_objects)]
+            vec![(is_enabled * should_disclose * parsed_objects, public_objects)]
         });
 
         meta.lookup_any("parsed_objects must be in private_objects if should_disclose is 0", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let parsed_objects = region.query_advice(config.parsed_objects, Rotation::cur());
             let private_objects = region.query_instance(config.private_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
             let should_hide = Expression::Constant(Fr::one()) - should_disclose;
-            vec![(should_hide * parsed_objects, private_objects)]
+            vec![(is_enabled * should_hide * parsed_objects, private_objects)]
         });
 
         meta.create_gate("Constrain order of operations", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let is_payload_prev = region.query_advice(config.is_payload, Rotation::prev());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
@@ -313,40 +316,45 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![
                 // If is_type is turned on, the previous is_type must be turned off.
                 // Because a type tag consumes exactly 1 bit.
-                is_type_cur.clone() * is_type_prev.clone(),
+                is_enabled.clone() * is_type_cur.clone() * is_type_prev.clone(),
                 // If is_length is turned on, the previous is_payload must be turned off.
                 // Because there's no such case that a length byte is followed by a payload byte.
-                is_length_cur.clone() * is_payload_prev.clone(),
+                is_enabled.clone() * is_length_cur.clone() * is_payload_prev.clone(),
                 // If is_payload is turned on, the previous is_type must be turned off.
                 // Because there's no such case that a payload byte is followed by a type byte.
-                is_payload_cur.clone() * is_type_prev.clone(),
+                is_enabled.clone() * is_payload_cur.clone() * is_type_prev.clone(),
                 // If is_length_prev = 1 && is_length_cur = 0 && is_primitive_cur = 1, then is_payload_cur must be 1
                 // Because in a primitive object payload bytes follows length bytes
-                is_length_prev.clone()
+                is_enabled.clone()
+                    * is_length_prev.clone()
                     * not::expr(is_length_cur.clone())
                     * is_primitive_cur.clone()
                     * not::expr(is_payload_cur.clone()),
                 // If is_length_prev = 1 && is_length_cur = 0 && is_primitive_cur = 0, then is_type_cur must be 1
                 // Because in an object that's not primitive a type byte follows length bytes
-                is_length_prev.clone()
+                is_enabled.clone()
+                    * is_length_prev.clone()
                     * not::expr(is_length_cur.clone())
                     * not::expr(is_primitive_cur.clone())
                     * not::expr(is_type_cur.clone()),
                 // If is_length_prev = 1 && is_length_cur = 0, then parsed_bytes must equal header_size
                 // This is to prevent an attacker from stop parsing length bytes early.
-                is_length_prev.clone()
+                is_enabled.clone()
+                    * is_length_prev.clone()
                     * not::expr(is_length_cur.clone())
                     * (parsed_bytes_cur.clone() - header_size_cur.clone()),
                 // If is_payload_prev = 1 && is_payload_cur = 0,
                 // then parsed_bytes must equal header_size + payload_size.
                 // This is to prevent an attacker from stop parsing payload bytes early.
-                is_payload_prev.clone()
+                is_enabled.clone()
+                    * is_payload_prev.clone()
                     * not::expr(is_payload_cur.clone())
                     * (parsed_bytes_cur.clone() - header_size_cur.clone() - payload_size_cur.clone()),
             ]
         });
 
         meta.create_gate("Constrain value of registers", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
             let disclosure_next = region.query_instance(config.disclosure, Rotation::next());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
@@ -367,72 +375,79 @@ impl plonk::Circuit<Fr> for Circuit {
             let should_disclose_cur = region.query_advice(config.should_disclose, Rotation::cur());
             vec![
                 // if is_type = 1, reset the register. otherwise keep the value
-                type_tag_next - select::expr(is_type_cur.clone(), der_byte_cur.clone(), type_tag_cur.clone()),
-                parsed_bytes_next
-                    - select::expr(
-                        is_type_cur.clone(),
-                        // If is_type = 1, reset the register with 1.
-                        Expression::Constant(Fr::one()),
-                        // otherwise, increment the register
-                        parsed_bytes_cur.clone() + Expression::Constant(Fr::one()),
-                    ),
-                parsed_objects_next
-                    - select::expr(
-                        is_type_cur.clone(),
-                        // If is_type = 1, increment the register.
-                        parsed_objects_cur.clone() + Expression::Constant(Fr::one()),
-                        // otherwise, keep the value
-                        parsed_objects_cur.clone(),
-                    ),
-                header_size_next
-                    - select::expr(
-                        is_type_cur.clone(),
-                        // is_type = 1, reset the register with 2.
-                        Expression::Constant(Fr::from(2)),
-                        select::expr(
-                            // If it's the first row of length bytes and the last bit of der_byte is turned on,
-                            and::expr([
-                                is_length_cur.clone(),
-                                is_type_prev.clone(),
-                                not::expr(is_below_128_cur.clone()),
-                            ]),
-                            // The first 7 bits of der_byte indicates length of length bytes.
-                            header_size_cur.clone() + der_byte_cur.clone() - Expression::Constant(Fr::from(1 << 7)),
-                            // otherwise keep the value
-                            header_size_cur.clone(),
-                        ),
-                    ),
-                payload_size_next
-                    - select::expr(
-                        is_type_cur.clone(),
-                        // If is_type = 1, reset the register with 0
-                        Expression::Constant(Fr::zero()),
-                        select::expr(
-                            is_length_cur.clone(),
+                is_enabled.clone()
+                    * (type_tag_next - select::expr(is_type_cur.clone(), der_byte_cur.clone(), type_tag_cur.clone())),
+                is_enabled.clone()
+                    * (parsed_bytes_next
+                        - select::expr(
+                            is_type_cur.clone(),
+                            // If is_type = 1, reset the register with 1.
+                            Expression::Constant(Fr::one()),
+                            // otherwise, increment the register
+                            parsed_bytes_cur.clone() + Expression::Constant(Fr::one()),
+                        )),
+                is_enabled.clone()
+                    * (parsed_objects_next
+                        - select::expr(
+                            is_type_cur.clone(),
+                            // If is_type = 1, increment the register.
+                            parsed_objects_cur.clone() + Expression::Constant(Fr::one()),
+                            // otherwise, keep the value
+                            parsed_objects_cur.clone(),
+                        )),
+                is_enabled.clone()
+                    * (header_size_next
+                        - select::expr(
+                            is_type_cur.clone(),
+                            // is_type = 1, reset the register with 2.
+                            Expression::Constant(Fr::from(2)),
                             select::expr(
-                                // If it's the first row of length bytes,
-                                is_type_prev.clone(),
-                                // If der_byte's 8th bit is turned off, reset the register with der_byte.
-                                // otherwise, reset the register with 0
-                                is_below_128_cur.clone() * der_byte_cur.clone(),
-                                // If it's not the first row of length bytes, push those bytes into payload_size
-                                // accumulator. big endian.
-                                payload_size_cur.clone() * Expression::Constant(Fr::from(1 << 8))
-                                    + der_byte_cur.clone(),
+                                // If it's the first row of length bytes and the last bit of der_byte is turned on,
+                                and::expr([
+                                    is_length_cur.clone(),
+                                    is_type_prev.clone(),
+                                    not::expr(is_below_128_cur.clone()),
+                                ]),
+                                // The first 7 bits of der_byte indicates length of length bytes.
+                                header_size_cur.clone() + der_byte_cur.clone() - Expression::Constant(Fr::from(1 << 7)),
+                                // otherwise keep the value
+                                header_size_cur.clone(),
                             ),
-                            // otherwise keep the value
-                            payload_size_cur.clone(),
-                        ),
-                    ),
-                disclosure_next.clone()
-                    - select::expr(
-                        // If we should disclose the byte
-                        and::expr([should_disclose_cur.clone(), is_payload_cur.clone()]),
-                        // We disclose the byte
-                        der_byte_cur.clone(),
-                        // Otherwise we write a value that's over MAX_BYTE to indicate that those bytes are redacted
-                        Expression::Constant(Fr::from(1 << 8)),
-                    ),
+                        )),
+                is_enabled.clone()
+                    * (payload_size_next
+                        - select::expr(
+                            is_type_cur.clone(),
+                            // If is_type = 1, reset the register with 0
+                            Expression::Constant(Fr::zero()),
+                            select::expr(
+                                is_length_cur.clone(),
+                                select::expr(
+                                    // If it's the first row of length bytes,
+                                    is_type_prev.clone(),
+                                    // If der_byte's 8th bit is turned off, reset the register with der_byte.
+                                    // otherwise, reset the register with 0
+                                    is_below_128_cur.clone() * der_byte_cur.clone(),
+                                    // If it's not the first row of length bytes, push those bytes into payload_size
+                                    // accumulator. big endian.
+                                    payload_size_cur.clone() * Expression::Constant(Fr::from(1 << 8))
+                                        + der_byte_cur.clone(),
+                                ),
+                                // otherwise keep the value
+                                payload_size_cur.clone(),
+                            ),
+                        )),
+                is_enabled.clone()
+                    * (disclosure_next.clone()
+                        - select::expr(
+                            // If we should disclose the byte
+                            and::expr([should_disclose_cur.clone(), is_payload_cur.clone()]),
+                            // We disclose the byte
+                            der_byte_cur.clone(),
+                            // Otherwise we write a value that's over MAX_BYTE to indicate that those bytes are
+                            // redacted
+                            Expression::Constant(Fr::from(1 << 8)),
+                        )),
             ]
         });
 
@@ -443,6 +458,9 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_region(
             || "DerChip",
             |mut region| {
+                // Enable is_enable
+                config.is_enabled.enable(&mut region, 0)?;
+
                 // Assign initial state
                 let mut state = State::new();
                 region.assign_advice_from_constant(
@@ -506,7 +524,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     Fr::from(self.should_disclose(state.parsed_objects)),
                 )?;
 
-                for row_index in 1..(1 << Self::K) {
+                for row_index in 1..(1 << Self::K) - Self::K {
                     // Assign action
                     let action = if let Some(byte) = self.der_bytes.get(row_index) {
                         Action::Parse(*byte)
@@ -525,6 +543,11 @@ impl plonk::Circuit<Fr> for Circuit {
                         row_index - 1,
                         || Value::known(Fr::from(action.is_below_128())),
                     )?;
+
+                    // Enable is_enable
+                    if row_index < (1 << Self::K) - Self::K {
+                        config.is_enabled.enable(&mut region, row_index)?;
+                    }
 
                     // Assign new state
                     state = state.update(action);
@@ -594,13 +617,13 @@ impl plonk::Circuit<Fr> for Circuit {
                 region.assign_advice_from_constant(
                     || "Assign der_byte",
                     config.der_byte,
-                    (1 << Self::K) - 1,
+                    (1 << Self::K) - Self::K,
                     Fr::from(Action::DoNothing.der_byte()),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign is_below_128",
                     config.is_below_128,
-                    (1 << Self::K) - 1,
+                    (1 << Self::K) - Self::K,
                     Fr::from(Action::DoNothing.is_below_128()),
                 )?;
 
@@ -611,7 +634,7 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_table(
             || "DerChip",
             |mut table| {
-                for row_index in 0..(1 << Self::K) {
+                for row_index in 0..(1 << Self::K) - Self::K {
                     let row_value = row_index & 0b11111111;
                     table.assign_cell(
                         || "List of all possible bytes",
