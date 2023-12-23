@@ -1,0 +1,12 @@
+# Directory for build artifacts
+build/
+
+# Directory for coverage reports
+coverage/
+
+# Node modules directory
+node_modules/
+
+*.tsbuildinfo
+ts/*.js
+*.d.ts
