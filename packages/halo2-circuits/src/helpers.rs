@@ -34,6 +34,9 @@ pub fn read_citizen_cert(cert_path: &str) -> (BigUint, BigUint, BigUint) {
 
     // Extract the TBS (To-Be-Signed) data from the certificate
     let tbs_bytes = cert.tbs_certificate.as_ref();
+    for tbs_byte in tbs_bytes {
+        println!("{:0x}", tbs_byte)
+    }
     let tbs_biguint = BigUint::from_bytes_le(tbs_bytes);
     // println!("TBS (To-Be-Signed): {:x?}", tbs);
 

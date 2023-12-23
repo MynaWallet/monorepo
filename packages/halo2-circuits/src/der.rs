@@ -10,6 +10,7 @@ use zkevm_gadgets::util::*;
 
 // DER type tag.
 const OCTET_STRING: u8 = 0x04;
+const NULL: u8 = 0x05;
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 enum Action {
@@ -19,7 +20,7 @@ enum Action {
 
 impl Action {
     fn der_byte(self) -> u64 {
-        if let Action::Parse(byte) = self { byte as u64 } else { 1u64 << 8 }
+        if let Action::Parse(byte) = self { byte as u64 } else { 0 }
     }
 
     fn is_below_128(self) -> bool {
@@ -72,28 +73,29 @@ impl State {
     }
 
     fn is_primitive(self) -> bool {
-        self.type_tag < 1 << 5 && self.type_tag != OCTET_STRING
+        // if 6th bit of type tag = 0 then it's a primitive object
+        // if 6th bit of type tag = 1 then it's a composite object
+        0 >= (self.type_tag >> 5) & 1 && self.type_tag != OCTET_STRING && self.type_tag != NULL
     }
 
     fn update(self, action: Action) -> State {
+        println!("");
+        if let Action::Parse(byte) = action {
+            println!("der_byte: {:0x}", byte);
+        }
+        println!("byte_kind: {:?}", self.byte_kind);
+        println!("payload_size: {:0x}", self.payload_size);
+        println!("header_size: {}", self.header_size);
+        println!("parsed_bytes: {}", self.parsed_bytes);
+        println!("parsed_objects: {}", self.parsed_objects);
+
         let mut new_state = self.clone();
         new_state.parsed_bytes += 1;
 
-        if self.byte_kind == ByteKind::Type {
-            new_state.byte_kind = ByteKind::Length;
-            new_state.type_tag = match action {
-                Action::Parse(byte) => byte,
-                Action::DoNothing => 0,
-            };
-            new_state.parsed_bytes = 1;
-            new_state.header_size = 2;
-            new_state.payload_size = 0;
-            new_state.parsed_objects += 1;
-        } else if self.byte_kind == ByteKind::Length && self.parsed_bytes == self.header_size - 1 {
-            new_state.byte_kind = ByteKind::Payload;
-        } else if self.byte_kind == ByteKind::Payload && self.parsed_bytes == self.header_size + self.payload_size - 1 {
-            new_state.byte_kind = ByteKind::Type;
-        };
+        // parsed_bytes_next, header_size_next, payload_size_next are derived from is_type_cur, is_length_cur,
+        // is_payload_cur, der_byte_cur, is_type_prev. In the constraint we use is_type_prev to check if this row is the
+        // first row of the length bytes But since we can't read is_type_prev here we use parsed_bytes_cur == 1 to
+        // check it
 
         if let Action::Parse(byte) = action {
             if self.byte_kind == ByteKind::Length {
@@ -108,6 +110,31 @@ impl State {
                     new_state.payload_size += byte as u32;
                 }
             }
+        }
+
+        // is_type_next, is_length_next, is_payload_next are derived from is_type_cur, is_length_cur, is_payload_cur,
+        // parsed_bytes_next, payload_size_next, header_size_next.
+
+        if self.byte_kind == ByteKind::Type {
+            new_state.byte_kind = ByteKind::Length;
+            new_state.type_tag = match action {
+                Action::Parse(byte) => byte,
+                Action::DoNothing => 0,
+            };
+            new_state.parsed_bytes = 1;
+            new_state.header_size = 2;
+            new_state.payload_size = 0;
+            new_state.parsed_objects += 1;
+        } else if self.byte_kind == ByteKind::Length && new_state.parsed_bytes == new_state.header_size {
+            if self.is_primitive() {
+                new_state.byte_kind = ByteKind::Payload;
+            } else {
+                new_state.byte_kind = ByteKind::Type;
+            }
+        } else if self.byte_kind == ByteKind::Payload
+            && new_state.parsed_bytes == new_state.header_size + new_state.payload_size
+        {
+            new_state.byte_kind = ByteKind::Type;
         }
 
         new_state
@@ -154,6 +181,8 @@ pub struct Circuit {
 
 impl Circuit {
     const K: usize = 14;
+    const BLINDING_FACTORS: usize = 6;
+    const REDACTED: u64 = 1u64 << 8;
 }
 
 impl plonk::Circuit<Fr> for Circuit {
@@ -166,7 +195,7 @@ impl plonk::Circuit<Fr> for Circuit {
 
     fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let config = Self::Config {
-            is_enabled: meta.selector(),
+            is_enabled: meta.complex_selector(),
             der_byte: meta.advice_column(),
             is_type: meta.advice_column(),
             is_length: meta.advice_column(),
@@ -187,8 +216,22 @@ impl plonk::Circuit<Fr> for Circuit {
             disclosure: meta.instance_column(),
             constants: meta.fixed_column(),
         };
-        meta.enable_constant(config.constants);
+        meta.enable_equality(config.der_byte);
+        meta.enable_equality(config.is_type);
+        meta.enable_equality(config.is_length);
+        meta.enable_equality(config.is_payload);
+        meta.enable_equality(config.header_size);
+        meta.enable_equality(config.payload_size);
+        meta.enable_equality(config.type_tag);
+        meta.enable_equality(config.parsed_bytes);
+        meta.enable_equality(config.parsed_objects);
+        meta.enable_equality(config.is_primitive);
+        meta.enable_equality(config.is_below_128);
+        meta.enable_equality(config.public_objects);
+        meta.enable_equality(config.private_objects);
+        meta.enable_equality(config.should_disclose);
         meta.enable_equality(config.constants);
+        meta.enable_constant(config.constants);
 
         meta.create_gate("Selector columns must be either 0 or 1", |gate| {
             let is_enabled = gate.query_selector(config.is_enabled);
@@ -199,7 +242,6 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                is_enabled.clone() * (is_enabled.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
@@ -303,59 +345,59 @@ impl plonk::Circuit<Fr> for Circuit {
 
         meta.create_gate("Constrain order of operations", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let is_payload_prev = region.query_advice(config.is_payload, Rotation::prev());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
-            let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
-            let payload_size_cur = region.query_advice(config.payload_size, Rotation::cur());
+            let is_payload_next = region.query_advice(config.is_payload, Rotation::next());
+            let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
+            let payload_size_next = region.query_advice(config.payload_size, Rotation::next());
+            let is_length_next = region.query_advice(config.is_length, Rotation::next());
             let is_length_cur = region.query_advice(config.is_length, Rotation::cur());
-            let is_length_prev = region.query_advice(config.is_length, Rotation::prev());
+            let is_type_next = region.query_advice(config.is_type, Rotation::next());
             let is_type_cur = region.query_advice(config.is_type, Rotation::cur());
-            let is_type_prev = region.query_advice(config.is_type, Rotation::prev());
-            let is_primitive_cur = region.query_advice(config.is_primitive, Rotation::cur());
-            let header_size_cur = region.query_advice(config.header_size, Rotation::cur());
+            let is_primitive_next = region.query_advice(config.is_primitive, Rotation::next());
+            let header_size_next = region.query_advice(config.header_size, Rotation::next());
             vec![
                 // If is_type is turned on, the previous is_type must be turned off.
                 // Because a type tag consumes exactly 1 bit.
-                is_enabled.clone() * is_type_cur.clone() * is_type_prev.clone(),
+                is_enabled.clone() * is_type_next.clone() * is_type_cur.clone(),
                 // If is_length is turned on, the previous is_payload must be turned off.
                 // Because there's no such case that a length byte is followed by a payload byte.
-                is_enabled.clone() * is_length_cur.clone() * is_payload_prev.clone(),
+                is_enabled.clone() * is_length_next.clone() * is_payload_cur.clone(),
                 // If is_payload is turned on, the previous is_type must be turned off.
                 // Because there's no such case that a payload byte is followed by a type byte.
-                is_enabled.clone() * is_payload_cur.clone() * is_type_prev.clone(),
-                // If is_length_prev = 1 && is_length_cur = 0 && is_primitive_cur = 1, then is_payload_cur must be 1
+                is_enabled.clone() * is_payload_next.clone() * is_type_cur.clone(),
+                // If is_length_cur = 1 && is_length_next = 0 && is_primitive_next = 1, then is_payload_next must be 1
                 // Because in a primitive object payload bytes follows length bytes
                 is_enabled.clone()
-                    * is_length_prev.clone()
-                    * not::expr(is_length_cur.clone())
-                    * is_primitive_cur.clone()
-                    * not::expr(is_payload_cur.clone()),
-                // If is_length_prev = 1 && is_length_cur = 0 && is_primitive_cur = 0, then is_type_cur must be 1
+                    * is_length_cur.clone()
+                    * not::expr(is_length_next.clone())
+                    * is_primitive_next.clone()
+                    * not::expr(is_payload_next.clone()),
+                // If is_length_cur = 1 && is_length_next = 0 && is_primitive_next = 0, then is_type_next must be 1
                 // Because in an object that's not primitive a type byte follows length bytes
                 is_enabled.clone()
-                    * is_length_prev.clone()
-                    * not::expr(is_length_cur.clone())
-                    * not::expr(is_primitive_cur.clone())
-                    * not::expr(is_type_cur.clone()),
-                // If is_length_prev = 1 && is_length_cur = 0, then parsed_bytes must equal header_size
+                    * is_length_cur.clone()
+                    * not::expr(is_length_next.clone())
+                    * not::expr(is_primitive_next.clone())
+                    * not::expr(is_type_next.clone()),
+                // If is_length_cur = 1 && is_length_next = 0, then parsed_bytes must equal header_size
                 // This is to prevent an attacker from stop parsing length bytes early.
                 is_enabled.clone()
-                    * is_length_prev.clone()
-                    * not::expr(is_length_cur.clone())
-                    * (parsed_bytes_cur.clone() - header_size_cur.clone()),
-                // If is_payload_prev = 1 && is_payload_cur = 0,
+                    * is_length_cur.clone()
+                    * not::expr(is_length_next.clone())
+                    * (parsed_bytes_next.clone() - header_size_next.clone()),
+                // If is_payload_cur = 1 && is_payload_next = 0,
                 // then parsed_bytes must equal header_size + payload_size.
                 // This is to prevent an attacker from stop parsing payload bytes early.
                 is_enabled.clone()
-                    * is_payload_prev.clone()
-                    * not::expr(is_payload_cur.clone())
-                    * (parsed_bytes_cur.clone() - header_size_cur.clone() - payload_size_cur.clone()),
+                    * is_payload_cur.clone()
+                    * not::expr(is_payload_next.clone())
+                    * (parsed_bytes_next.clone() - header_size_next.clone() - payload_size_next.clone()),
             ]
         });
 
         meta.create_gate("Constrain value of registers", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let disclosure_next = region.query_instance(config.disclosure, Rotation::next());
+            // let disclosure_next = region.query_instance(config.disclosure, Rotation::next());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
             let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
@@ -437,17 +479,13 @@ impl plonk::Circuit<Fr> for Circuit {
                                 payload_size_cur.clone(),
                             ),
                         )),
-                is_enabled.clone()
-                    * (disclosure_next.clone()
-                        - select::expr(
-                            // If we should disclose the byte
-                            and::expr([should_disclose_cur.clone(), is_payload_cur.clone()]),
-                            // We disclose the byte
-                            der_byte_cur.clone(),
-                            // Otherwise we write a value that's over MAX_BYTE to indicate that those bytes are
-                            // redacted
-                            Expression::Constant(Fr::from(1 << 8)),
-                        )),
+                // is_enabled.clone()
+                //     * (disclosure_next.clone()
+                //         - select::expr( // If we should disclose the byte and::expr([should_disclose_cur.clone(),
+                //           is_payload_cur.clone()]), // We disclose the byte der_byte_cur.clone(), // Otherwise we
+                //           write a value that's over MAX_BYTE to indicate that those bytes are // redacted
+                //           Expression::Constant(Fr::from(Self::REDACTED)),
+                //         )),
             ]
         });
 
@@ -458,9 +496,6 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_region(
             || "DerChip",
             |mut region| {
-                // Enable is_enable
-                config.is_enabled.enable(&mut region, 0)?;
-
                 // Assign initial state
                 let mut state = State::new();
                 region.assign_advice_from_constant(
@@ -524,7 +559,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     Fr::from(self.should_disclose(state.parsed_objects)),
                 )?;
 
-                for row_index in 1..(1 << Self::K) - Self::K {
+                for row_index in 1..(1 << Self::K) - Self::BLINDING_FACTORS {
                     // Assign action
                     let action = if let Some(byte) = self.der_bytes.get(row_index) {
                         Action::Parse(*byte)
@@ -545,9 +580,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     )?;
 
                     // Enable is_enable
-                    if row_index < (1 << Self::K) - Self::K {
-                        config.is_enabled.enable(&mut region, row_index)?;
-                    }
+                    config.is_enabled.enable(&mut region, row_index - 1)?;
 
                     // Assign new state
                     state = state.update(action);
@@ -617,13 +650,13 @@ impl plonk::Circuit<Fr> for Circuit {
                 region.assign_advice_from_constant(
                     || "Assign der_byte",
                     config.der_byte,
-                    (1 << Self::K) - Self::K,
+                    (1 << Self::K) - Self::BLINDING_FACTORS - 1,
                     Fr::from(Action::DoNothing.der_byte()),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign is_below_128",
                     config.is_below_128,
-                    (1 << Self::K) - Self::K,
+                    (1 << Self::K) - Self::BLINDING_FACTORS - 1,
                     Fr::from(Action::DoNothing.is_below_128()),
                 )?;
 
@@ -634,7 +667,7 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_table(
             || "DerChip",
             |mut table| {
-                for row_index in 0..(1 << Self::K) - Self::K {
+                for row_index in 0..(1 << Self::K) - Self::BLINDING_FACTORS - 1 {
                     let row_value = row_index & 0b11111111;
                     table.assign_cell(
                         || "List of all possible bytes",
@@ -643,8 +676,11 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value =
-                        if row_index == OCTET_STRING as usize || row_index >= 1 << 5 { 0 } else { row_index };
+                    let row_value: u8 = if row_index == OCTET_STRING as usize || row_index == NULL as usize {
+                        0
+                    } else {
+                        row_index as u8 & 0b11011111
+                    };
                     table.assign_cell(
                         || "List of type tags for primitive types",
                         config.primitive_types,
@@ -652,10 +688,12 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value = if row_index == OCTET_STRING as usize || row_index < 1 << 5 {
-                        OCTET_STRING as usize
+                    let row_value: u8 = if row_index == NULL as usize {
+                        NULL
+                    } else if row_index == OCTET_STRING as usize {
+                        OCTET_STRING
                     } else {
-                        row_index
+                        row_index as u8 | 0b00100000
                     };
                     table.assign_cell(
                         || "List of type tags for composite types",
@@ -681,106 +719,123 @@ impl Circuit {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, State};
+    use super::Action;
     use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
     use std::collections::HashSet;
 
     #[test]
-    fn mock_der() {
-        let mut circuit = super::Circuit {
-            der_bytes: vec![
-                48, 130, 5, 22, 160, 3, 2, 1, 2, 2, 4, 1, 140, 69, 62, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1,
-                11, 5, 0, 48, 129, 130, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 74, 80, 49, 13, 48, 11, 6, 3, 85, 4, 10,
-                12, 4, 74, 80, 75, 73, 49, 37, 48, 35, 6, 3, 85, 4, 11, 12, 28, 74, 80, 75, 73, 32, 102, 111, 114, 32,
-                117, 115, 101, 114, 32, 97, 117, 116, 104, 101, 110, 116, 105, 99, 97, 116, 105, 111, 110, 49, 61, 48,
-                59, 6, 3, 85, 4, 11, 12, 52, 74, 97, 112, 97, 110, 32, 65, 103, 101, 110, 99, 121, 32, 102, 111, 114,
-                32, 76, 111, 99, 97, 108, 32, 65, 117, 116, 104, 111, 114, 105, 116, 121, 32, 73, 110, 102, 111, 114,
-                109, 97, 116, 105, 111, 110, 32, 83, 121, 115, 116, 101, 109, 115, 48, 30, 23, 13, 50, 48, 48, 53, 49,
-                57, 49, 55, 51, 56, 53, 53, 90, 23, 13, 50, 52, 49, 50, 48, 55, 49, 52, 53, 57, 53, 57, 90, 48, 47, 49,
-                11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 74, 80, 49, 32, 48, 30, 6, 3, 85, 4, 3, 12, 23, 51, 48, 56, 48, 49,
-                52, 69, 52, 53, 74, 69, 70, 73, 71, 49, 52, 49, 48, 52, 48, 48, 51, 65, 48, 130, 1, 34, 48, 13, 6, 9,
-                42, 134, 72, 134, 247, 13, 1, 1, 1, 5, 0, 3, 130, 1, 15, 0, 48, 130, 1, 10, 2, 130, 1, 1, 0, 178, 55,
-                225, 13, 227, 171, 175, 41, 174, 202, 35, 194, 10, 85, 43, 211, 37, 20, 108, 7, 86, 252, 91, 9, 123,
-                153, 30, 126, 197, 105, 85, 30, 187, 29, 185, 123, 113, 61, 124, 102, 98, 77, 120, 175, 249, 6, 140,
-                18, 228, 65, 221, 209, 133, 33, 164, 47, 105, 216, 92, 154, 12, 238, 112, 124, 146, 109, 2, 234, 7, 88,
-                141, 57, 23, 51, 4, 217, 29, 227, 1, 115, 46, 175, 186, 144, 203, 215, 160, 164, 22, 179, 58, 84, 74,
-                21, 149, 48, 169, 26, 166, 184, 197, 46, 76, 96, 234, 81, 32, 118, 180, 202, 143, 157, 97, 83, 42, 254,
-                154, 97, 36, 212, 187, 134, 218, 196, 154, 194, 105, 75, 163, 228, 41, 115, 190, 139, 1, 116, 80, 167,
-                241, 164, 154, 100, 86, 78, 113, 52, 130, 215, 211, 45, 4, 251, 69, 245, 105, 217, 134, 214, 241, 204,
-                196, 75, 123, 113, 178, 123, 93, 134, 65, 21, 12, 17, 111, 133, 170, 17, 93, 206, 220, 231, 165, 240,
-                198, 95, 4, 142, 203, 211, 166, 84, 194, 255, 229, 20, 236, 163, 82, 96, 39, 209, 127, 18, 207, 4, 75,
-                146, 202, 115, 165, 65, 162, 32, 161, 190, 163, 249, 45, 196, 82, 1, 82, 59, 178, 175, 18, 137, 76,
-                201, 129, 177, 93, 177, 159, 70, 170, 40, 108, 29, 104, 58, 45, 67, 129, 49, 86, 158, 159, 250, 20,
-                205, 55, 213, 245, 212, 97, 55, 2, 3, 1, 0, 1, 163, 130, 2, 252, 48, 130, 2, 248, 48, 14, 6, 3, 85, 29,
-                15, 1, 1, 255, 4, 4, 3, 2, 7, 128, 48, 19, 6, 3, 85, 29, 37, 4, 12, 48, 10, 6, 8, 43, 6, 1, 5, 5, 7, 3,
-                2, 48, 73, 6, 3, 85, 29, 32, 1, 1, 255, 4, 63, 48, 61, 48, 59, 6, 11, 42, 131, 8, 140, 155, 85, 8, 5,
-                1, 3, 30, 48, 44, 48, 42, 6, 8, 43, 6, 1, 5, 5, 7, 2, 1, 22, 30, 104, 116, 116, 112, 58, 47, 47, 119,
-                119, 119, 46, 106, 112, 107, 105, 46, 103, 111, 46, 106, 112, 47, 99, 112, 115, 46, 104, 116, 109, 108,
-                48, 129, 183, 6, 3, 85, 29, 18, 4, 129, 175, 48, 129, 172, 164, 129, 169, 48, 129, 166, 49, 11, 48, 9,
-                6, 3, 85, 4, 6, 19, 2, 74, 80, 49, 39, 48, 37, 6, 3, 85, 4, 10, 12, 30, 229, 133, 172, 231, 154, 132,
-                229, 128, 139, 228, 186, 186, 232, 170, 141, 232, 168, 188, 227, 130, 181, 227, 131, 188, 227, 131,
-                147, 227, 130, 185, 49, 57, 48, 55, 6, 3, 85, 4, 11, 12, 48, 229, 133, 172, 231, 154, 132, 229, 128,
-                139, 228, 186, 186, 232, 170, 141, 232, 168, 188, 227, 130, 181, 227, 131, 188, 227, 131, 147, 227,
-                130, 185, 229, 136, 169, 231, 148, 168, 232, 128, 133, 232, 168, 188, 230, 152, 142, 231, 148, 168, 49,
-                51, 48, 49, 6, 3, 85, 4, 11, 12, 42, 229, 156, 176, 230, 150, 185, 229, 133, 172, 229, 133, 177, 229,
-                155, 163, 228, 189, 147, 230, 131, 133, 229, 160, 177, 227, 130, 183, 227, 130, 185, 227, 131, 134,
-                227, 131, 160, 230, 169, 159, 230, 167, 139, 48, 129, 187, 6, 3, 85, 29, 31, 4, 129, 179, 48, 129, 176,
-                48, 129, 173, 160, 129, 170, 160, 129, 167, 164, 129, 164, 48, 129, 161, 49, 11, 48, 9, 6, 3, 85, 4, 6,
-                19, 2, 74, 80, 49, 13, 48, 11, 6, 3, 85, 4, 10, 12, 4, 74, 80, 75, 73, 49, 37, 48, 35, 6, 3, 85, 4, 11,
-                12, 28, 74, 80, 75, 73, 32, 102, 111, 114, 32, 117, 115, 101, 114, 32, 97, 117, 116, 104, 101, 110,
-                116, 105, 99, 97, 116, 105, 111, 110, 49, 32, 48, 30, 6, 3, 85, 4, 11, 12, 23, 67, 82, 76, 32, 68, 105,
-                115, 116, 114, 105, 98, 117, 116, 105, 111, 110, 32, 80, 111, 105, 110, 116, 115, 49, 21, 48, 19, 6, 3,
-                85, 4, 11, 12, 12, 75, 97, 110, 97, 103, 97, 119, 97, 45, 107, 101, 110, 49, 35, 48, 33, 6, 3, 85, 4,
-                3, 12, 26, 89, 111, 107, 111, 104, 97, 109, 97, 45, 115, 104, 105, 45, 78, 97, 107, 97, 45, 107, 117,
-                32, 67, 82, 76, 68, 80, 48, 58, 6, 8, 43, 6, 1, 5, 5, 7, 1, 1, 4, 46, 48, 44, 48, 42, 6, 8, 43, 6, 1,
-                5, 5, 7, 48, 1, 134, 30, 104, 116, 116, 112, 58, 47, 47, 111, 99, 115, 112, 97, 117, 116, 104, 110,
-                111, 114, 109, 46, 106, 112, 107, 105, 46, 103, 111, 46, 106, 112, 48, 129, 178, 6, 3, 85, 29, 35, 4,
-                129, 170, 48, 129, 167, 128, 20, 140, 213, 88, 106, 137, 20, 133, 229, 89, 55, 155, 126, 41, 212, 16,
-                207, 210, 139, 53, 147, 161, 129, 136, 164, 129, 133, 48, 129, 130, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19,
-                2, 74, 80, 49, 13, 48, 11, 6, 3, 85, 4, 10, 12, 4, 74, 80, 75, 73, 49, 37, 48, 35, 6, 3, 85, 4, 11, 12,
-                28, 74, 80, 75, 73, 32, 102, 111, 114, 32, 117, 115, 101, 114, 32, 97, 117, 116, 104, 101, 110, 116,
-                105, 99, 97, 116, 105, 111, 110, 49, 61, 48, 59, 6, 3, 85, 4, 11, 12, 52, 74, 97, 112, 97, 110, 32, 65,
-                103, 101, 110, 99, 121, 32, 102, 111, 114, 32, 76, 111, 99, 97, 108, 32, 65, 117, 116, 104, 111, 114,
-                105, 116, 121, 32, 73, 110, 102, 111, 114, 109, 97, 116, 105, 111, 110, 32, 83, 121, 115, 116, 101,
-                109, 115, 130, 4, 1, 51, 195, 73, 48, 29, 6, 3, 85, 29, 14, 4, 22, 4, 20, 2, 0, 136, 180, 211, 20, 167,
-                117, 93, 40, 236, 27, 9, 158, 196, 94, 47, 238, 249, 146,
-            ],
-            public_objects: HashSet::new(),
-        };
-        circuit.public_objects.insert(4);
+    fn der() {
+        let mut der_bytes = vec![
+            0x30, 0x82, 0x5, 0x16, 0xA0, 0x3, 0x2, 0x1, 0x2, 0x2, 0x4, 0x1, 0x8C, 0x45, 0x3E, 0x30, 0xD, 0x6, 0x9,
+            0x2A, 0x86, 0x48, 0x86, 0xF7, 0xD, 0x1, 0x1, 0xB, 0x5, 0x0, 0x30, 0x81, 0x82, 0x31, 0xB, 0x30, 0x9, 0x6,
+            0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30, 0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A,
+            0x50, 0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49,
+            0x20, 0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69,
+            0x63, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x3D, 0x30, 0x3B, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x34, 0x4A,
+            0x61, 0x70, 0x61, 0x6E, 0x20, 0x41, 0x67, 0x65, 0x6E, 0x63, 0x79, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x4C, 0x6F,
+            0x63, 0x61, 0x6C, 0x20, 0x41, 0x75, 0x74, 0x68, 0x6F, 0x72, 0x69, 0x74, 0x79, 0x20, 0x49, 0x6E, 0x66, 0x6F,
+            0x72, 0x6D, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6D, 0x73, 0x30, 0x1E, 0x17,
+            0xD, 0x32, 0x30, 0x30, 0x35, 0x31, 0x39, 0x31, 0x37, 0x33, 0x38, 0x35, 0x35, 0x5A, 0x17, 0xD, 0x32, 0x34,
+            0x31, 0x32, 0x30, 0x37, 0x31, 0x34, 0x35, 0x39, 0x35, 0x39, 0x5A, 0x30, 0x2F, 0x31, 0xB, 0x30, 0x9, 0x6,
+            0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0x20, 0x30, 0x1E, 0x6, 0x3, 0x55, 0x4, 0x3, 0xC, 0x17,
+            0x33, 0x30, 0x38, 0x30, 0x31, 0x34, 0x45, 0x34, 0x35, 0x4A, 0x45, 0x46, 0x49, 0x47, 0x31, 0x34, 0x31, 0x30,
+            0x34, 0x30, 0x30, 0x33, 0x41, 0x30, 0x82, 0x1, 0x22, 0x30, 0xD, 0x6, 0x9, 0x2A, 0x86, 0x48, 0x86, 0xF7,
+            0xD, 0x1, 0x1, 0x1, 0x5, 0x0, 0x3, 0x82, 0x1, 0xF, 0x0, 0x30, 0x82, 0x1, 0xA, 0x2, 0x82, 0x1, 0x1, 0x0,
+            0xB2, 0x37, 0xE1, 0xD, 0xE3, 0xAB, 0xAF, 0x29, 0xAE, 0xCA, 0x23, 0xC2, 0xA, 0x55, 0x2B, 0xD3, 0x25, 0x14,
+            0x6C, 0x7, 0x56, 0xFC, 0x5B, 0x9, 0x7B, 0x99, 0x1E, 0x7E, 0xC5, 0x69, 0x55, 0x1E, 0xBB, 0x1D, 0xB9, 0x7B,
+            0x71, 0x3D, 0x7C, 0x66, 0x62, 0x4D, 0x78, 0xAF, 0xF9, 0x6, 0x8C, 0x12, 0xE4, 0x41, 0xDD, 0xD1, 0x85, 0x21,
+            0xA4, 0x2F, 0x69, 0xD8, 0x5C, 0x9A, 0xC, 0xEE, 0x70, 0x7C, 0x92, 0x6D, 0x2, 0xEA, 0x7, 0x58, 0x8D, 0x39,
+            0x17, 0x33, 0x4, 0xD9, 0x1D, 0xE3, 0x1, 0x73, 0x2E, 0xAF, 0xBA, 0x90, 0xCB, 0xD7, 0xA0, 0xA4, 0x16, 0xB3,
+            0x3A, 0x54, 0x4A, 0x15, 0x95, 0x30, 0xA9, 0x1A, 0xA6, 0xB8, 0xC5, 0x2E, 0x4C, 0x60, 0xEA, 0x51, 0x20, 0x76,
+            0xB4, 0xCA, 0x8F, 0x9D, 0x61, 0x53, 0x2A, 0xFE, 0x9A, 0x61, 0x24, 0xD4, 0xBB, 0x86, 0xDA, 0xC4, 0x9A, 0xC2,
+            0x69, 0x4B, 0xA3, 0xE4, 0x29, 0x73, 0xBE, 0x8B, 0x1, 0x74, 0x50, 0xA7, 0xF1, 0xA4, 0x9A, 0x64, 0x56, 0x4E,
+            0x71, 0x34, 0x82, 0xD7, 0xD3, 0x2D, 0x4, 0xFB, 0x45, 0xF5, 0x69, 0xD9, 0x86, 0xD6, 0xF1, 0xCC, 0xC4, 0x4B,
+            0x7B, 0x71, 0xB2, 0x7B, 0x5D, 0x86, 0x41, 0x15, 0xC, 0x11, 0x6F, 0x85, 0xAA, 0x11, 0x5D, 0xCE, 0xDC, 0xE7,
+            0xA5, 0xF0, 0xC6, 0x5F, 0x4, 0x8E, 0xCB, 0xD3, 0xA6, 0x54, 0xC2, 0xFF, 0xE5, 0x14, 0xEC, 0xA3, 0x52, 0x60,
+            0x27, 0xD1, 0x7F, 0x12, 0xCF, 0x4, 0x4B, 0x92, 0xCA, 0x73, 0xA5, 0x41, 0xA2, 0x20, 0xA1, 0xBE, 0xA3, 0xF9,
+            0x2D, 0xC4, 0x52, 0x1, 0x52, 0x3B, 0xB2, 0xAF, 0x12, 0x89, 0x4C, 0xC9, 0x81, 0xB1, 0x5D, 0xB1, 0x9F, 0x46,
+            0xAA, 0x28, 0x6C, 0x1D, 0x68, 0x3A, 0x2D, 0x43, 0x81, 0x31, 0x56, 0x9E, 0x9F, 0xFA, 0x14, 0xCD, 0x37, 0xD5,
+            0xF5, 0xD4, 0x61, 0x37, 0x2, 0x3, 0x1, 0x0, 0x1, 0xA3, 0x82, 0x2, 0xFC, 0x30, 0x82, 0x2, 0xF8, 0x30, 0xE,
+            0x6, 0x3, 0x55, 0x1D, 0xF, 0x1, 0x1, 0xFF, 0x4, 0x4, 0x3, 0x2, 0x7, 0x80, 0x30, 0x13, 0x6, 0x3, 0x55, 0x1D,
+            0x25, 0x4, 0xC, 0x30, 0xA, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x3, 0x2, 0x30, 0x49, 0x6, 0x3, 0x55,
+            0x1D, 0x20, 0x1, 0x1, 0xFF, 0x4, 0x3F, 0x30, 0x3D, 0x30, 0x3B, 0x6, 0xB, 0x2A, 0x83, 0x8, 0x8C, 0x9B, 0x55,
+            0x8, 0x5, 0x1, 0x3, 0x1E, 0x30, 0x2C, 0x30, 0x2A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x2, 0x1, 0x16,
+            0x1E, 0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x77, 0x77, 0x77, 0x2E, 0x6A, 0x70, 0x6B, 0x69, 0x2E, 0x67,
+            0x6F, 0x2E, 0x6A, 0x70, 0x2F, 0x63, 0x70, 0x73, 0x2E, 0x68, 0x74, 0x6D, 0x6C, 0x30, 0x81, 0xB7, 0x6, 0x3,
+            0x55, 0x1D, 0x12, 0x4, 0x81, 0xAF, 0x30, 0x81, 0xAC, 0xA4, 0x81, 0xA9, 0x30, 0x81, 0xA6, 0x31, 0xB, 0x30,
+            0x9, 0x6, 0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0x27, 0x30, 0x25, 0x6, 0x3, 0x55, 0x4, 0xA,
+            0xC, 0x1E, 0xE5, 0x85, 0xAC, 0xE7, 0x9A, 0x84, 0xE5, 0x80, 0x8B, 0xE4, 0xBA, 0xBA, 0xE8, 0xAA, 0x8D, 0xE8,
+            0xA8, 0xBC, 0xE3, 0x82, 0xB5, 0xE3, 0x83, 0xBC, 0xE3, 0x83, 0x93, 0xE3, 0x82, 0xB9, 0x31, 0x39, 0x30, 0x37,
+            0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x30, 0xE5, 0x85, 0xAC, 0xE7, 0x9A, 0x84, 0xE5, 0x80, 0x8B, 0xE4, 0xBA,
+            0xBA, 0xE8, 0xAA, 0x8D, 0xE8, 0xA8, 0xBC, 0xE3, 0x82, 0xB5, 0xE3, 0x83, 0xBC, 0xE3, 0x83, 0x93, 0xE3, 0x82,
+            0xB9, 0xE5, 0x88, 0xA9, 0xE7, 0x94, 0xA8, 0xE8, 0x80, 0x85, 0xE8, 0xA8, 0xBC, 0xE6, 0x98, 0x8E, 0xE7, 0x94,
+            0xA8, 0x31, 0x33, 0x30, 0x31, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x2A, 0xE5, 0x9C, 0xB0, 0xE6, 0x96, 0xB9,
+            0xE5, 0x85, 0xAC, 0xE5, 0x85, 0xB1, 0xE5, 0x9B, 0xA3, 0xE4, 0xBD, 0x93, 0xE6, 0x83, 0x85, 0xE5, 0xA0, 0xB1,
+            0xE3, 0x82, 0xB7, 0xE3, 0x82, 0xB9, 0xE3, 0x83, 0x86, 0xE3, 0x83, 0xA0, 0xE6, 0xA9, 0x9F, 0xE6, 0xA7, 0x8B,
+            0x30, 0x81, 0xBB, 0x6, 0x3, 0x55, 0x1D, 0x1F, 0x4, 0x81, 0xB3, 0x30, 0x81, 0xB0, 0x30, 0x81, 0xAD, 0xA0,
+            0x81, 0xAA, 0xA0, 0x81, 0xA7, 0xA4, 0x81, 0xA4, 0x30, 0x81, 0xA1, 0x31, 0xB, 0x30, 0x9, 0x6, 0x3, 0x55,
+            0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30, 0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A, 0x50,
+            0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49, 0x20,
+            0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69, 0x63,
+            0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x20, 0x30, 0x1E, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x17, 0x43, 0x52,
+            0x4C, 0x20, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x50, 0x6F, 0x69,
+            0x6E, 0x74, 0x73, 0x31, 0x15, 0x30, 0x13, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0xC, 0x4B, 0x61, 0x6E, 0x61, 0x67,
+            0x61, 0x77, 0x61, 0x2D, 0x6B, 0x65, 0x6E, 0x31, 0x23, 0x30, 0x21, 0x6, 0x3, 0x55, 0x4, 0x3, 0xC, 0x1A,
+            0x59, 0x6F, 0x6B, 0x6F, 0x68, 0x61, 0x6D, 0x61, 0x2D, 0x73, 0x68, 0x69, 0x2D, 0x4E, 0x61, 0x6B, 0x61, 0x2D,
+            0x6B, 0x75, 0x20, 0x43, 0x52, 0x4C, 0x44, 0x50, 0x30, 0x3A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x1,
+            0x1, 0x4, 0x2E, 0x30, 0x2C, 0x30, 0x2A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x30, 0x1, 0x86, 0x1E,
+            0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x6F, 0x63, 0x73, 0x70, 0x61, 0x75, 0x74, 0x68, 0x6E, 0x6F, 0x72,
+            0x6D, 0x2E, 0x6A, 0x70, 0x6B, 0x69, 0x2E, 0x67, 0x6F, 0x2E, 0x6A, 0x70, 0x30, 0x81, 0xB2, 0x6, 0x3, 0x55,
+            0x1D, 0x23, 0x4, 0x81, 0xAA, 0x30, 0x81, 0xA7, 0x80, 0x14, 0x8C, 0xD5, 0x58, 0x6A, 0x89, 0x14, 0x85, 0xE5,
+            0x59, 0x37, 0x9B, 0x7E, 0x29, 0xD4, 0x10, 0xCF, 0xD2, 0x8B, 0x35, 0x93, 0xA1, 0x81, 0x88, 0xA4, 0x81, 0x85,
+            0x30, 0x81, 0x82, 0x31, 0xB, 0x30, 0x9, 0x6, 0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30,
+            0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A, 0x50, 0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55,
+            0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20,
+            0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x3D, 0x30, 0x3B,
+            0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x34, 0x4A, 0x61, 0x70, 0x61, 0x6E, 0x20, 0x41, 0x67, 0x65, 0x6E, 0x63,
+            0x79, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x4C, 0x6F, 0x63, 0x61, 0x6C, 0x20, 0x41, 0x75, 0x74, 0x68, 0x6F, 0x72,
+            0x69, 0x74, 0x79, 0x20, 0x49, 0x6E, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x53, 0x79,
+            0x73, 0x74, 0x65, 0x6D, 0x73, 0x82, 0x4, 0x1, 0x33, 0xC3, 0x49, 0x30, 0x1D, 0x6, 0x3, 0x55, 0x1D, 0xE, 0x4,
+            0x16, 0x4, 0x14, 0x2, 0x0, 0x88, 0xB4, 0xD3, 0x14, 0xA7, 0x75, 0x5D, 0x28, 0xEC, 0x1B, 0x9, 0x9E, 0xC4,
+            0x5E, 0x2F, 0xEE, 0xF9, 0x92,
+        ];
+        der_bytes.extend(vec![0; (1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS - der_bytes.len()]);
+        let circuit = super::Circuit { der_bytes, public_objects: HashSet::from_iter(vec![3]) };
 
         let instance_columns: Vec<Vec<Fr>> = vec![
-            (0..1 << super::Circuit::K)
+            (0..(1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS)
                 .map(|row_index| {
                     let row_value =
-                        if let Some(_) = circuit.public_objects.get(&row_index) { row_index as u64 } else { 0u64 };
+                        if circuit.public_objects.contains(&(row_index as u32)) { row_index as u64 } else { 0u64 };
                     Fr::from(row_value)
                 })
                 .collect(),
-            (0..1 << super::Circuit::K)
+            (0..(1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS)
                 .map(|row_index| {
                     let row_value =
-                        if let Some(_) = circuit.public_objects.get(&row_index) { 0u64 } else { row_index as u64 };
+                        if circuit.public_objects.contains(&(row_index as u32)) { 0u64 } else { row_index as u64 };
                     Fr::from(row_value)
                 })
                 .collect(),
-            std::iter::once(Fr::from(1u64 << 8))
-                .chain((0..1 << super::Circuit::K).scan(super::State::new(), |state, row_index| {
-                    let disclosure = if circuit.should_disclose(state.parsed_objects) {
-                        if let Some(der_byte) = circuit.der_bytes.get(row_index) { *der_byte as u64 } else { 1u64 << 8 }
-                    } else {
-                        1u64 << 8
-                    };
+            std::iter::once(Fr::from(super::Circuit::REDACTED))
+                .chain((0..(1 << super::Circuit::K) - 1 - super::Circuit::BLINDING_FACTORS).scan(
+                    super::State::new(),
+                    |state, row_index| {
+                        let action = if let Some(byte) = circuit.der_bytes.get(row_index) {
+                            Action::Parse(*byte)
+                        } else {
+                            Action::DoNothing
+                        };
+                        let disclosure = if circuit.should_disclose(state.parsed_objects) {
+                            if let Action::Parse(byte) = action { byte as u64 } else { super::Circuit::REDACTED }
+                        } else {
+                            super::Circuit::REDACTED
+                        };
 
-                    let action = if let Some(byte) = circuit.der_bytes.get(row_index) {
-                        Action::Parse(*byte)
-                    } else {
-                        Action::DoNothing
-                    };
-                    *state = state.update(action);
-
-                    Some(Fr::from(disclosure))
-                }))
+                        *state = state.update(action);
+                        Some(Fr::from(disclosure))
+                    },
+                ))
                 .collect(),
         ];
 
