@@ -5,6 +5,7 @@ include "../../../node_modules/circomlib/circuits/poseidon.circom";
 include "./helpers/bigint.circom";
 include "./helpers/rsa.circom";
 include "./helpers/sha.circom";
+include "./helpers/extract.circom";
 
 template SelectiveDisclosure(max_cert_bytes, n, k) {
     signal input rawTbsCert[max_cert_bytes];
@@ -17,6 +18,7 @@ template SelectiveDisclosure(max_cert_bytes, n, k) {
     // To prevent brute force attack you need to set this number more than 12+ digits
     // Should we add assertion?
     signal input userSecret;
+    signal input start;
 
     // ======== Variables Verification ========
     assert(max_cert_bytes % 64 == 0);
@@ -62,15 +64,22 @@ template SelectiveDisclosure(max_cert_bytes, n, k) {
 
     // TODO: Make this output smaller
     // ======== Mask and Hash Raw TBS Certificate ========
-    signal output maskedTbsCert[max_cert_bytes];
-    component poseidon[max_cert_bytes];
+    signal maskedTbsCert[max_cert_bytes];
+    // component poseidon[max_cert_bytes];
+    // for (var i = 0; i < max_cert_bytes; i++) {
+    //     poseidon[i] = Poseidon(2);
+    //     // Is this secure?
+    //     poseidon[i].inputs[0] <== rawTbsCert[i] * mask[i];
+    //     poseidon[i].inputs[1] <== userSecret;
+    //     maskedTbsCert[i] <== poseidon[i].out;
+    // }
     for (var i = 0; i < max_cert_bytes; i++) {
-        poseidon[i] = Poseidon(2);
-        // Is this secure?
-        poseidon[i].inputs[0] <== rawTbsCert[i] * mask[i];
-        poseidon[i].inputs[1] <== userSecret;
-        maskedTbsCert[i] <== poseidon[i].out;
+        maskedTbsCert[i] <== rawTbsCert[i] * mask[i];
     }
+    component shiftAndPack = ShiftAndPack(2048, 150, 31);
+    shiftAndPack.in <== maskedTbsCert;
+    shiftAndPack.shift <== start;
+    signal output out[5] <== shiftAndPack.out;
 }
 
 component main = SelectiveDisclosure(2048, 121, 17);
