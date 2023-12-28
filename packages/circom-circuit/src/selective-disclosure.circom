@@ -62,24 +62,41 @@ template SelectiveDisclosure(max_cert_bytes, n, k) {
         rsa.signature[i] <== signature[i];
     }
 
-    // TODO: Make this output smaller
-    // ======== Mask and Hash Raw TBS Certificate ========
+    // ======== Mask Raw TBS Certificate ========
     signal maskedTbsCert[max_cert_bytes];
-    // component poseidon[max_cert_bytes];
-    // for (var i = 0; i < max_cert_bytes; i++) {
-    //     poseidon[i] = Poseidon(2);
-    //     // Is this secure?
-    //     poseidon[i].inputs[0] <== rawTbsCert[i] * mask[i];
-    //     poseidon[i].inputs[1] <== userSecret;
-    //     maskedTbsCert[i] <== poseidon[i].out;
-    // }
     for (var i = 0; i < max_cert_bytes; i++) {
         maskedTbsCert[i] <== rawTbsCert[i] * mask[i];
     }
-    component shiftAndPack = ShiftAndPack(2048, 150, 31);
-    shiftAndPack.in <== maskedTbsCert;
-    shiftAndPack.shift <== start;
-    signal output out[5] <== shiftAndPack.out;
+
+    // ======== Shift Masked TBS Certificate ========
+    component shiftLeft = VarShiftLeft(2048, 150);
+    shiftLeft.in <== maskedTbsCert;
+    shiftLeft.shift <== start;
+
+    // ======== Check Object Identifier ========
+    shiftLeft.out[2] === 42;
+    shiftLeft.out[3] === 131;
+    shiftLeft.out[4] === 8;
+    shiftLeft.out[5] === 140;
+    shiftLeft.out[6] === 155;
+    shiftLeft.out[7] === 85;
+    shiftLeft.out[8] === 8;
+    shiftLeft.out[9] === 5;
+    shiftLeft.out[10] === 5;
+    shiftLeft.out[11] === 5;
+
+    // ======== Pack and Hash Masked TBS Certificate ========
+    component packBytes = PackBytes(150, 5, 31);
+    packBytes.in <== shiftLeft.out;
+    signal output out[5];
+    component poseidon[5];
+    for (var i = 0; i < 5; i++) {
+        poseidon[i] = Poseidon(2);
+        // Is this secure?
+        poseidon[i].inputs[0] <== packBytes.out[i];
+        poseidon[i].inputs[1] <== userSecret;
+        out[i] <== poseidon[i].out;
+    }
 }
 
-component main = SelectiveDisclosure(2048, 121, 17);
+component main { public [ modulus ] } = SelectiveDisclosure(2048, 121, 17);
