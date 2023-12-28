@@ -15,3 +15,10 @@ gov-sig-setup/public.json
 gov-sig-setup/verification_key.json
 gov-sig-setup/input.json
 gov-sig-build/*
+setup-disclosure/circuit*
+setup-disclosure/witness.wtns
+setup-disclosure/proof.json
+setup-disclosure/public.json
+setup-disclosure/verification_key.json
+setup-disclosure/input.json
+build-disclosure/*
