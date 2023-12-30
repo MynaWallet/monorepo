@@ -55,6 +55,7 @@ user-sig-create-proof:
 	snarkjs groth16 prove ./user-sig-setup/circuit_final.zkey ./user-sig-setup/witness.wtns ./user-sig-setup/proof.json ./user-sig-setup/public.json
 
 create-disclosure-proof:
+	node build-disclosure/selective-disclosure_js/generate_witness.js ./build-disclosure/selective-disclosure_js/selective-disclosure.wasm ./setup-disclosure/input.json ./setup-disclosure/witness.wtns
 	snarkjs groth16 prove ./setup-disclosure/circuit_final.zkey ./setup-disclosure/witness.wtns ./setup-disclosure/proof.json ./setup-disclosure/public.json
 
 gov-sig-verify-proof:
