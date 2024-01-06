@@ -1,3 +1,4 @@
+use halo2_proofs::arithmetic::Field;
 use std::collections::HashSet;
 
 use halo2_proofs::{
@@ -7,10 +8,138 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use zkevm_gadgets::util::*;
+use std::cell::LazyCell;
 
-// DER type tag.
-const OCTET_STRING: u8 = 0x04;
-const NULL: u8 = 0x05;
+const DOES_CONTAIN_DER: Vec<bool> = vec![
+    true,  // SEQUENCE
+    true,  // tbsCertificate
+    false,  // tbsCertificate.version
+    false,  // tbsCertificate.serialNumber
+    true,  // tbsCertificate.signature
+    false,  // tbsCertificate.signature.algorithm
+    false,  // tbsCertificate.signature.parameters
+    true, // tbsCertificate.issuer
+    true, // tbsCertificate.issuer.countryName
+    false,  // tbsCertificate.issuer.countryName.type
+    false,  // tbsCertificate.issuer.countryName.value
+    true,  // tbsCertificate.issuer.organizationName
+    false,  // tbsCertificate.issuer.organizationName.type
+    false,  // tbsCertificate.issuer.organizationName.value
+    true,  // tbsCertificate.issuer.organizationalUnitName
+    false,  // tbsCertificate.issuer.organizationalUnitName.type
+    false,  // tbsCertificate.issuer.organizationalUnitName.value
+    true,  // tbsCertificate.issuer.organizationalUnitName
+    false,  // tbsCertificate.issuer.organizationalUnitName.type
+    false,  // tbsCertificate.issuer.organizationalUnitName.value
+    true,  // tbsCertificate.validity
+    false,  // tbsCertificate.validity.notBefore
+    false,  // tbsCertificate.validity.notAfter
+    true,  // tbsCertificate.subject
+    true,  // tbsCertificate.subject.countryName
+    false,  // tbsCertificate.subject.countryName.type
+    false,  // tbsCertificate.subject.countryName.value
+    true,  // tbsCertificate.subject.localityName
+    false,  // tbsCertificate.subject.localityName.type
+    false,  // tbsCertificate.subject.localityName.value
+    true,  // tbsCertificate.subject.localityName
+    false,  // tbsCertificate.subject.localityName.type
+    false,  // tbsCertificate.subject.localityName.value
+    true,  // tbsCertificate.subject.commonName
+    false,  // tbsCertificate.subject.commonName.type
+    false,  // tbsCertificate.subject.commonName.value
+    true,  // tbsCertificate.subjectPublicKeyInfo
+    true,  // tbsCertificate.subjectPublicKeyInfo.algorithm
+    false,  // tbsCertificate.subjectPublicKeyInfo.algorithm.algorithm
+    false,  // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters
+    true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey
+    true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.E
+
+];
+
+const PRIMITIVE_OBJECTS: LazyCell<HashSet<u64>> = LazyCell::new(|| vec![
+    2,  // version
+    3,  // serialNumber
+    5,  // signature.algorithm
+    9,  // issuer.countryName.type
+    10,  // issuer.countryNaemt.value
+    12,  // issuer.organizationName.type
+    13,  // issuer.organizationName.value
+    15,  // issuer.organizationalUnitName.type
+    16,  // issuer.organizationalUnitName.value
+    18,  // issuer.organizationalUnitName.type
+    19,  // issuer.organizationalUnitName.value
+    21,  // validity.notBefore
+    22,  // validity.notAfter
+    25,  // subject.countryName.type
+    26,  // subject.countryName.value
+    28,  // localityName.type
+    29,  // localityName.value
+    31,  // localityName.type
+    32,  // localityName.value
+    34,  // commonName.type
+    35,  // commonName.value
+    38,  // subjectPublicKeyInfo.algorithm.algorithm
+    42,  // subjectPublicKeyInfo.subjectPublicKey[0]
+    43,  // subjectPublicKeyInfo.subjectPublicKey[1]
+    46,  // extensions.authorityKeyIdentifier.extnID
+    47,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.critical
+    50,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.keyIdentifier
+    54,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.countryName.type
+    55,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.countryName.value
+    57,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationName.type
+    58,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationName.value
+    60,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.type
+    61,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.value
+    63,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.type
+    64,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.value
+    66,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertSerialNumber
+    68,  // extensions.keyUsage.extnID
+    69,  // extensions.keyUsage.critical
+    71,  // extensions.keyUsage.extnValue.keyUsage
+    73,  // extensions.subjectAltName.extnID
+    74,  // extensions.subjectAltName.critical
+    78,  // extensions.subjectAltName.extnValue.otherName.commonName.type
+    79,  // extensions.subjectAltName.extnValue.otherName.commonName.value
+    82,  // extensions.subjectAltName.extnValue.otherName.dateOfBirth.type
+    83,  // extensions.subjectAltName.extnValue.otherName.dateOfBirth.value
+    86,  // extensions.subjectAltName.extnValue.otherName.gender.type
+    87,  // extensions.subjectAltName.extnValue.otherName.gender.value
+    90,  // extensions.subjectAltName.extnValue.otherName.address.type
+    91,  // extensions.subjectAltName.extnValue.otherName.address.value
+    94,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.type
+    95,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.value
+    98,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.type
+    99,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.value
+    101,  // extensions.issuerAltName.extnID
+    102,  // extensions.issuerAltName.critical
+    106,  // extensions.issuerAltName.extnValue.directoryName.countryName.type
+    107,  // extensions.issuerAltName.extnValue.directoryName.countryName.value
+    109,  // extensions.issuerAltName.extnValue.directoryName.organizationName.type
+    110,  // extensions.issuerAltName.extnValue.directoryName.organizationName.value
+    112,  // extensions.issuerAltName.extnValue.directoryName.organizationUnitName.type
+    113,  // extensions.issuerAltName.extnValue.directoryName.organizationUnitName.value
+    115,  // extensions.cRLDistributionPoints.extnID
+    116,  // extensions.cRLDistributionPoints.critical
+    122,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.countryName.type
+    123,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.countryName.value
+    125,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationName.type
+    126,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationName.value
+    128, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.type
+    129, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.value
+    131, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.type
+    132, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.value
+    134, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.commonName.type
+    135, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.commonName.value
+    137, // extensions.certificatePolicies.extnID
+    138, // extensions.certificatePolicies.critical
+    140, // extensions.certificatePolicies.extnValue.policyIdentifier
+    142, // extensions.certificatePolicies.extnValue.policyQualifiers.policyQualifierId
+    143, // extensions.certificatePolicies.extnValue.policyQualifiers.pqualifier
+    145, // extensions.subjectKeyIdentifier.extnId
+    146, // extensions.subjectKeyIdentifier.criticial
+    149, // extensions.subjectKeyIdentifier.extnValue.subjectKeyIdentifier.keyIdentifie
+r
+].into_iter().collect());
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 enum Action {
@@ -43,8 +172,8 @@ struct State {
     header_size: u32,
     payload_size: u32,
     parsed_bytes: u32,
-    parsed_objects: u32,
-    type_tag: u8,
+    parsed_types: u32,
+    remaining_bytes: u8,
     byte_kind: ByteKind,
 }
 
@@ -54,7 +183,7 @@ impl State {
             header_size: 0,
             payload_size: 0,
             parsed_bytes: 0,
-            parsed_objects: 0,
+            parsed_types: 0,
             type_tag: 0,
             byte_kind: ByteKind::Type,
         }
@@ -73,9 +202,7 @@ impl State {
     }
 
     fn is_primitive(self) -> bool {
-        // if 6th bit of type tag = 0 then it's a primitive object
-        // if 6th bit of type tag = 1 then it's a composite object
-        0 >= (self.type_tag >> 5) & 1 && self.type_tag != OCTET_STRING && self.type_tag != NULL
+        Circuit::PRIMITIVE_OBJECTS.contains(self.parsed_types)
     }
 
     fn update(self, action: Action) -> State {
@@ -87,7 +214,7 @@ impl State {
         println!("payload_size: {:0x}", self.payload_size);
         println!("header_size: {}", self.header_size);
         println!("parsed_bytes: {}", self.parsed_bytes);
-        println!("parsed_objects: {}", self.parsed_objects);
+        println!("parsed_types: {}", self.parsed_types);
 
         let mut new_state = self.clone();
         new_state.parsed_bytes += 1;
@@ -124,7 +251,7 @@ impl State {
             new_state.parsed_bytes = 1;
             new_state.header_size = 2;
             new_state.payload_size = 0;
-            new_state.parsed_objects += 1;
+            new_state.parsed_types += 1;
         } else if self.byte_kind == ByteKind::Length && new_state.parsed_bytes == new_state.header_size {
             if self.is_primitive() {
                 new_state.byte_kind = ByteKind::Payload;
@@ -143,6 +270,7 @@ impl State {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    // 0 for blinded rows. 1 otherwise.
     pub is_enabled: Selector,
     // The DER we're parsing. each cell corresponds to a byte.
     pub der_byte: Column<Advice>,
@@ -156,15 +284,18 @@ pub struct Config {
     pub header_size: Column<Advice>,
     // The length (bytes) of the payload in the object we're parsing.
     pub payload_size: Column<Advice>,
-    // The number of parsed object in the entire DER.
-    pub type_tag: Column<Advice>,
+    // How many bytes we have parsed in the object we're parsing.
+    // When the object ends it circles back to 1.
     pub parsed_bytes: Column<Advice>,
-    pub parsed_objects: Column<Advice>,
+    // How many type bytes we have parsed.
+    pub parsed_types: Column<Advice>,
+    // How many bytes we have left to parse.
+    pub remaining_bytes: Column<Advice>,
     pub is_primitive: Column<Advice>,
-    pub primitive_types: TableColumn,
-    pub composite_types: TableColumn,
-    // 0..256
-    pub byte: TableColumn,
+    pub primitive_objects: TableColumn,
+    pub constructed_objects: TableColumn,
+    // 0..2^(K-1)
+    pub range_check: TableColumn,
     pub is_below_128: Column<Advice>,
     pub public_objects: Column<Instance>,
     pub private_objects: Column<Instance>,
@@ -183,6 +314,9 @@ impl Circuit {
     const K: usize = 14;
     const BLINDING_FACTORS: usize = 6;
     const REDACTED: u64 = 1u64 << 8;
+    const PUBLIC_OBJECTS: HashSet<u32> = {
+
+    }
 }
 
 impl plonk::Circuit<Fr> for Circuit {
@@ -202,13 +336,13 @@ impl plonk::Circuit<Fr> for Circuit {
             is_payload: meta.advice_column(),
             header_size: meta.advice_column(),
             payload_size: meta.advice_column(),
-            type_tag: meta.advice_column(),
             parsed_bytes: meta.advice_column(),
-            parsed_objects: meta.advice_column(),
+            parsed_types: meta.advice_column(),
+            remaining_bytes: meta.advice_column(),
             is_primitive: meta.advice_column(),
-            primitive_types: meta.lookup_table_column(),
-            composite_types: meta.lookup_table_column(),
-            byte: meta.lookup_table_column(),
+            primitive_objects: meta.lookup_table_column(),
+            constructed_objects: meta.lookup_table_column(),
+            range_check: meta.lookup_table_column(),
             is_below_128: meta.advice_column(),
             public_objects: meta.instance_column(),
             private_objects: meta.instance_column(),
@@ -222,9 +356,9 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.is_payload);
         meta.enable_equality(config.header_size);
         meta.enable_equality(config.payload_size);
-        meta.enable_equality(config.type_tag);
         meta.enable_equality(config.parsed_bytes);
-        meta.enable_equality(config.parsed_objects);
+        meta.enable_equality(config.parsed_types);
+        meta.enable_equality(config.remaining_bytes);
         meta.enable_equality(config.is_primitive);
         meta.enable_equality(config.is_below_128);
         meta.enable_equality(config.public_objects);
@@ -233,8 +367,7 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.constants);
         meta.enable_constant(config.constants);
 
-        meta.create_gate("Selector columns must be either 0 or 1", |gate| {
-            let is_enabled = gate.query_selector(config.is_enabled);
+        meta.create_gate("These columns must be either 0 or 1", |gate| {
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
@@ -242,18 +375,16 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                is_enabled.clone() * is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone() * is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone() * is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone() * is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone() * is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone()
-                    * should_disclose.clone()
-                    * (should_disclose.clone() - Expression::Constant(Fr::one())),
+                is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
+                is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
+                is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
+                is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
+                is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
+                should_disclose.clone() * (should_disclose.clone() - Expression::Constant(Fr::one())),
             ]
         });
 
-        meta.create_gate("Either one of is_type, is_length, is_payload must be turned on", |gate| {
+        meta.create_gate("If one of is_type, is_length, is_payload is on, the others should be off", |gate| {
             let is_enabled = gate.query_selector(config.is_enabled);
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
@@ -265,42 +396,54 @@ impl plonk::Circuit<Fr> for Circuit {
                 is_enabled.clone() * is_length.clone() * is_payload.clone(),
                 is_enabled.clone() * is_payload.clone() * is_type.clone(),
                 is_enabled.clone() * is_payload.clone() * is_length.clone(),
-                is_enabled.clone() * is_type.clone() * is_length.clone() * is_payload.clone(),
             ]
+        });
+
+        meta.create_gate("If all of is_type, is_length, is_payload is off, remaining_bytes = 0", |gate| {
+            let is_enabled = gate.query_selector(config.is_enabled);
+            let is_type = gate.query_advice(config.is_type, Rotation::cur());
+            let is_length = gate.query_advice(config.is_length, Rotation::cur());
+            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
+            let remaining_bytes = gate.query_advice(config.remaining_bytes, Rotation::cur());
+            vec![is_enabled * and::expr([not::expr(is_type), not::expr(is_length), not::expr(is_payload)]) * remaining_bytes]
+        });
+
+        meta.create_gate("If one of is_type, is_length, is_payload is on, remaining_bytes should decrement", |gate| {
+            let is_enabled = gate.query_selector(config.is_enabled);
+            let is_type = gate.query_advice(config.is_type, Rotation::cur());
+            let is_length = gate.query_advice(config.is_length, Rotation::cur());
+            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
+            let remaining_bytes_cur = gate.query_advice(config.remaining_bytes, Rotation::cur());
+            let remaining_bytes_next = gate.query_advice(config.remaining_bytes, Rotation::next());
+            vec![is_enabled * or::expr([is_type, is_length, is_payload]) * (remaining_bytes_cur - remaining_bytes_next + Expression::Constant(Fr::one()))]
+        });
+
+        meta.lookup("remaining_bytes < 2^(K-1)", |region| {
+            let is_enabled = region.query_selector(config.is_enabled);
+            let remaining_bytes = region.query_advice(config.remaining_bytes, Rotation::cur());
+            vec![(is_enabled * remaining_bytes, config.range_check)]
         });
 
         meta.lookup("der_byte <= 0b11111111", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
-            vec![(is_enabled * der_byte, config.byte)]
+            let left_shift = Expression::Constant(Fr::from(1 << (Self::K - 1 - 8)));
+            vec![(is_enabled * der_byte * left_shift, config.range_check)]
         });
 
-        meta.lookup("type_tag <= 0b11111111", |region| {
+        meta.lookup("parsed_types must be in primitive_objects if is_primitive is 1", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let type_tag = region.query_advice(config.type_tag, Rotation::cur());
-            vec![(is_enabled * type_tag, config.byte)]
+            let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
+            let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
+            vec![(is_enabled * is_primitive * parsed_types, config.primitive_objects)]
         });
 
-        meta.lookup("type_tag must be in primitive_types if is_primitive is 1", |region| {
+        meta.lookup("parsed_types must be in constructed_objects if is_primitive is 0", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let type_tag = region.query_advice(config.type_tag, Rotation::cur());
+            let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            vec![(is_enabled * is_primitive * type_tag, config.primitive_types)]
-        }); // 0 is in primitive_types so this lookup succeeds if is_primitive = 0
-
-        meta.lookup("type_tag must be in composite_types if is_primitive is 0", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
-            let type_tag = region.query_advice(config.type_tag, Rotation::cur());
-            let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            let is_composite = Expression::Constant(Fr::one()) - is_primitive;
-            vec![(
-                select::expr(
-                    and::expr([is_enabled, is_composite]),
-                    type_tag,
-                    Expression::Constant(Fr::from(OCTET_STRING as u64)),
-                ),
-                config.composite_types,
-            )]
+            let is_constructed = Expression::Constant(Fr::one()) - is_primitive;
+            vec![(is_enabled * not::expr(is_primitive) * parsed_types, config.constructed_objects)]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
@@ -320,27 +463,27 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![(is_enabled * is_above_128 * shifted, config.byte)]
         });
 
-        // assumption here is that parsed_objects will never be 0.
-        // If parsed_objects became 0 both lookup would succeed,
+        // assumption here is that parsed_types will never be 0.
+        // If parsed_types became 0 both lookup would succeed,
         // and there would be no constraint on whether should_disclose should be 0 or 1.
-        // Exception is that the first row where parsed_objects is constrained to be 0.
+        // Exception is that the first row where parsed_types is constrained to be 0.
         // The case of the first row is fine because is_payload is also constrained to be 0.
         // If is_payload = 0 no byte will be disclosed anyway.
-        meta.lookup_any("parsed_objects must be in public_objects if should_disclose is 1", |region| {
+        meta.lookup_any("parsed_types must be in public_objects if should_disclose is 1", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let parsed_objects = region.query_advice(config.parsed_objects, Rotation::cur());
+            let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let public_objects = region.query_instance(config.public_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
-            vec![(is_enabled * should_disclose * parsed_objects, public_objects)]
+            vec![(is_enabled * should_disclose * parsed_types, public_objects)]
         });
 
-        meta.lookup_any("parsed_objects must be in private_objects if should_disclose is 0", |region| {
+        meta.lookup_any("parsed_types must be in private_objects if should_disclose is 0", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
-            let parsed_objects = region.query_advice(config.parsed_objects, Rotation::cur());
+            let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let private_objects = region.query_instance(config.private_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
             let should_hide = Expression::Constant(Fr::one()) - should_disclose;
-            vec![(is_enabled * should_hide * parsed_objects, private_objects)]
+            vec![(is_enabled * should_hide * parsed_types, private_objects)]
         });
 
         meta.create_gate("Constrain order of operations", |region| {
@@ -360,10 +503,10 @@ impl plonk::Circuit<Fr> for Circuit {
                 // Because a type tag consumes exactly 1 bit.
                 is_enabled.clone() * is_type_next.clone() * is_type_cur.clone(),
                 // If is_length is turned on, the previous is_payload must be turned off.
-                // Because there's no such case that a length byte is followed by a payload byte.
+                // Because there's no such case that a length byte follows a payload byte.
                 is_enabled.clone() * is_length_next.clone() * is_payload_cur.clone(),
                 // If is_payload is turned on, the previous is_type must be turned off.
-                // Because there's no such case that a payload byte is followed by a type byte.
+                // Because there's no such case that a payload byte follows a type byte.
                 is_enabled.clone() * is_payload_next.clone() * is_type_cur.clone(),
                 // If is_length_cur = 1 && is_length_next = 0 && is_primitive_next = 1, then is_payload_next must be 1
                 // Because in a primitive object payload bytes follows length bytes
@@ -401,10 +544,8 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
             let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
-            let parsed_objects_next = region.query_advice(config.parsed_objects, Rotation::next());
-            let parsed_objects_cur = region.query_advice(config.parsed_objects, Rotation::cur());
-            let type_tag_next = region.query_advice(config.type_tag, Rotation::next());
-            let type_tag_cur = region.query_advice(config.type_tag, Rotation::cur());
+            let parsed_types_next = region.query_advice(config.parsed_types, Rotation::next());
+            let parsed_types_cur = region.query_advice(config.parsed_types, Rotation::cur());
             let header_size_next = region.query_advice(config.header_size, Rotation::next());
             let header_size_cur = region.query_advice(config.header_size, Rotation::cur());
             let payload_size_next = region.query_advice(config.payload_size, Rotation::next());
@@ -416,10 +557,7 @@ impl plonk::Circuit<Fr> for Circuit {
             let der_byte_cur = region.query_advice(config.der_byte, Rotation::cur());
             let should_disclose_cur = region.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                // if is_type = 1, reset the register. otherwise keep the value
-                is_enabled.clone()
-                    * (type_tag_next - select::expr(is_type_cur.clone(), der_byte_cur.clone(), type_tag_cur.clone())),
-                is_enabled.clone()
+                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
                     * (parsed_bytes_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -428,16 +566,16 @@ impl plonk::Circuit<Fr> for Circuit {
                             // otherwise, increment the register
                             parsed_bytes_cur.clone() + Expression::Constant(Fr::one()),
                         )),
-                is_enabled.clone()
-                    * (parsed_objects_next
+                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
+                    * (parsed_types_next
                         - select::expr(
                             is_type_cur.clone(),
                             // If is_type = 1, increment the register.
-                            parsed_objects_cur.clone() + Expression::Constant(Fr::one()),
+                            parsed_types_cur.clone() + Expression::Constant(Fr::one()),
                             // otherwise, keep the value
-                            parsed_objects_cur.clone(),
+                            parsed_types_cur.clone(),
                         )),
-                is_enabled.clone()
+                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
                     * (header_size_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -456,7 +594,7 @@ impl plonk::Circuit<Fr> for Circuit {
                                 header_size_cur.clone(),
                             ),
                         )),
-                is_enabled.clone()
+                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
                     * (payload_size_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -535,16 +673,10 @@ impl plonk::Circuit<Fr> for Circuit {
                     Fr::from(state.parsed_bytes as u64),
                 )?;
                 region.assign_advice_from_constant(
-                    || "Assign parsed_objects",
-                    config.parsed_objects,
+                    || "Assign parsed_types",
+                    config.parsed_types,
                     0,
-                    Fr::from(state.parsed_objects as u64),
-                )?;
-                region.assign_advice_from_constant(
-                    || "Assign type_tag",
-                    config.type_tag,
-                    0,
-                    Fr::from(state.type_tag as u64),
+                    Fr::from(state.parsed_types as u64),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign is_primitive",
@@ -556,7 +688,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     || "Assign should_disclose",
                     config.should_disclose,
                     0,
-                    Fr::from(self.should_disclose(state.parsed_objects)),
+                    Fr::from(self.should_disclose(state.parsed_types)),
                 )?;
 
                 for row_index in 1..(1 << Self::K) - Self::BLINDING_FACTORS {
@@ -621,16 +753,10 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(state.parsed_bytes as u64)),
                     )?;
                     region.assign_advice(
-                        || "Assign parsed_objects",
-                        config.parsed_objects,
+                        || "Assign parsed_types",
+                        config.parsed_types,
                         row_index,
-                        || Value::known(Fr::from(state.parsed_objects as u64)),
-                    )?;
-                    region.assign_advice(
-                        || "Assign type_tag",
-                        config.type_tag,
-                        row_index,
-                        || Value::known(Fr::from(state.type_tag as u64)),
+                        || Value::known(Fr::from(state.parsed_types as u64)),
                     )?;
                     region.assign_advice(
                         || "Assign is_primitive",
@@ -642,7 +768,7 @@ impl plonk::Circuit<Fr> for Circuit {
                         || "Assign should_disclose",
                         config.should_disclose,
                         row_index,
-                        || Value::known(Fr::from(self.should_disclose(state.parsed_objects))),
+                        || Value::known(Fr::from(self.should_disclose(state.parsed_types))),
                     )?;
                 }
 
@@ -676,30 +802,20 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value: u8 = if row_index == OCTET_STRING as usize || row_index == NULL as usize {
-                        0
-                    } else {
-                        row_index as u8 & 0b11011111
-                    };
+                    let row_value: u64 = if Self::PRIMITIVE_OBJECTS.contains(row_index) { row_index as u64 } else { 0 };
                     table.assign_cell(
-                        || "List of type tags for primitive types",
-                        config.primitive_types,
+                        || "List of all objects of which contents are not serialized in DER",
+                        config.primitive_objects,
                         row_index,
-                        || Value::known(Fr::from(row_value as u64)),
+                        || Value::known(Fr::from(row_value)),
                     )?;
 
-                    let row_value: u8 = if row_index == NULL as usize {
-                        NULL
-                    } else if row_index == OCTET_STRING as usize {
-                        OCTET_STRING
-                    } else {
-                        row_index as u8 | 0b00100000
-                    };
+                    let row_value: u64 = if Self::PRIMITIVE_OBJECTS.contains(row_index) { 0 } else { row_index as u64 };
                     table.assign_cell(
-                        || "List of type tags for composite types",
-                        config.composite_types,
+                        || "List of all objects of which contents are serialized in DER",
+                        config.constructed_objects,
                         row_index,
-                        || Value::known(Fr::from(row_value as u64)),
+                        || Value::known(Fr::from(row_value)),
                     )?;
                 }
 
@@ -712,8 +828,8 @@ impl plonk::Circuit<Fr> for Circuit {
 }
 
 impl Circuit {
-    fn should_disclose(&self, parsed_objects: u32) -> bool {
-        self.public_objects.contains(&parsed_objects)
+    fn should_disclose(&self, parsed_types: u32) -> bool {
+        self.public_objects.contains(&parsed_types)
     }
 }
 
@@ -826,7 +942,7 @@ mod tests {
                         } else {
                             Action::DoNothing
                         };
-                        let disclosure = if circuit.should_disclose(state.parsed_objects) {
+                        let disclosure = if circuit.should_disclose(state.parsed_types) {
                             if let Action::Parse(byte) = action { byte as u64 } else { super::Circuit::REDACTED }
                         } else {
                             super::Circuit::REDACTED
