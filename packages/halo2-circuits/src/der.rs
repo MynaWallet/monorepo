@@ -1,145 +1,11 @@
-use halo2_proofs::arithmetic::Field;
-use std::collections::HashSet;
-
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     halo2curves::bn256::Fr,
     plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector, TableColumn},
     poly::Rotation,
 };
+use std::collections::HashSet;
 use zkevm_gadgets::util::*;
-use std::cell::LazyCell;
-
-const DOES_CONTAIN_DER: Vec<bool> = vec![
-    true,  // SEQUENCE
-    true,  // tbsCertificate
-    false,  // tbsCertificate.version
-    false,  // tbsCertificate.serialNumber
-    true,  // tbsCertificate.signature
-    false,  // tbsCertificate.signature.algorithm
-    false,  // tbsCertificate.signature.parameters
-    true, // tbsCertificate.issuer
-    true, // tbsCertificate.issuer.countryName
-    false,  // tbsCertificate.issuer.countryName.type
-    false,  // tbsCertificate.issuer.countryName.value
-    true,  // tbsCertificate.issuer.organizationName
-    false,  // tbsCertificate.issuer.organizationName.type
-    false,  // tbsCertificate.issuer.organizationName.value
-    true,  // tbsCertificate.issuer.organizationalUnitName
-    false,  // tbsCertificate.issuer.organizationalUnitName.type
-    false,  // tbsCertificate.issuer.organizationalUnitName.value
-    true,  // tbsCertificate.issuer.organizationalUnitName
-    false,  // tbsCertificate.issuer.organizationalUnitName.type
-    false,  // tbsCertificate.issuer.organizationalUnitName.value
-    true,  // tbsCertificate.validity
-    false,  // tbsCertificate.validity.notBefore
-    false,  // tbsCertificate.validity.notAfter
-    true,  // tbsCertificate.subject
-    true,  // tbsCertificate.subject.countryName
-    false,  // tbsCertificate.subject.countryName.type
-    false,  // tbsCertificate.subject.countryName.value
-    true,  // tbsCertificate.subject.localityName
-    false,  // tbsCertificate.subject.localityName.type
-    false,  // tbsCertificate.subject.localityName.value
-    true,  // tbsCertificate.subject.localityName
-    false,  // tbsCertificate.subject.localityName.type
-    false,  // tbsCertificate.subject.localityName.value
-    true,  // tbsCertificate.subject.commonName
-    false,  // tbsCertificate.subject.commonName.type
-    false,  // tbsCertificate.subject.commonName.value
-    true,  // tbsCertificate.subjectPublicKeyInfo
-    true,  // tbsCertificate.subjectPublicKeyInfo.algorithm
-    false,  // tbsCertificate.subjectPublicKeyInfo.algorithm.algorithm
-    false,  // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters
-    true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey
-    true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.E
-
-];
-
-const PRIMITIVE_OBJECTS: LazyCell<HashSet<u64>> = LazyCell::new(|| vec![
-    2,  // version
-    3,  // serialNumber
-    5,  // signature.algorithm
-    9,  // issuer.countryName.type
-    10,  // issuer.countryNaemt.value
-    12,  // issuer.organizationName.type
-    13,  // issuer.organizationName.value
-    15,  // issuer.organizationalUnitName.type
-    16,  // issuer.organizationalUnitName.value
-    18,  // issuer.organizationalUnitName.type
-    19,  // issuer.organizationalUnitName.value
-    21,  // validity.notBefore
-    22,  // validity.notAfter
-    25,  // subject.countryName.type
-    26,  // subject.countryName.value
-    28,  // localityName.type
-    29,  // localityName.value
-    31,  // localityName.type
-    32,  // localityName.value
-    34,  // commonName.type
-    35,  // commonName.value
-    38,  // subjectPublicKeyInfo.algorithm.algorithm
-    42,  // subjectPublicKeyInfo.subjectPublicKey[0]
-    43,  // subjectPublicKeyInfo.subjectPublicKey[1]
-    46,  // extensions.authorityKeyIdentifier.extnID
-    47,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.critical
-    50,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.keyIdentifier
-    54,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.countryName.type
-    55,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.countryName.value
-    57,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationName.type
-    58,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationName.value
-    60,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.type
-    61,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.value
-    63,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.type
-    64,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertIssuer.authorityCertIssuer.directoryName.organizationalUnitName.value
-    66,  // extensions.authorityKeyIdentifier.extnValue.authorityKeyIdentifier.authorityCertSerialNumber
-    68,  // extensions.keyUsage.extnID
-    69,  // extensions.keyUsage.critical
-    71,  // extensions.keyUsage.extnValue.keyUsage
-    73,  // extensions.subjectAltName.extnID
-    74,  // extensions.subjectAltName.critical
-    78,  // extensions.subjectAltName.extnValue.otherName.commonName.type
-    79,  // extensions.subjectAltName.extnValue.otherName.commonName.value
-    82,  // extensions.subjectAltName.extnValue.otherName.dateOfBirth.type
-    83,  // extensions.subjectAltName.extnValue.otherName.dateOfBirth.value
-    86,  // extensions.subjectAltName.extnValue.otherName.gender.type
-    87,  // extensions.subjectAltName.extnValue.otherName.gender.value
-    90,  // extensions.subjectAltName.extnValue.otherName.address.type
-    91,  // extensions.subjectAltName.extnValue.otherName.address.value
-    94,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.type
-    95,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.value
-    98,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.type
-    99,  // extensions.subjectAltName.extnValue.otherName.substituteCharacterOfCommonName.value
-    101,  // extensions.issuerAltName.extnID
-    102,  // extensions.issuerAltName.critical
-    106,  // extensions.issuerAltName.extnValue.directoryName.countryName.type
-    107,  // extensions.issuerAltName.extnValue.directoryName.countryName.value
-    109,  // extensions.issuerAltName.extnValue.directoryName.organizationName.type
-    110,  // extensions.issuerAltName.extnValue.directoryName.organizationName.value
-    112,  // extensions.issuerAltName.extnValue.directoryName.organizationUnitName.type
-    113,  // extensions.issuerAltName.extnValue.directoryName.organizationUnitName.value
-    115,  // extensions.cRLDistributionPoints.extnID
-    116,  // extensions.cRLDistributionPoints.critical
-    122,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.countryName.type
-    123,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.countryName.value
-    125,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationName.type
-    126,  // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationName.value
-    128, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.type
-    129, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.value
-    131, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.type
-    132, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.organizationUnitName.value
-    134, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.commonName.type
-    135, // extensions.cRLDistributionPoints.extnValue.distributionPoint.fullName.directoryName.commonName.value
-    137, // extensions.certificatePolicies.extnID
-    138, // extensions.certificatePolicies.critical
-    140, // extensions.certificatePolicies.extnValue.policyIdentifier
-    142, // extensions.certificatePolicies.extnValue.policyQualifiers.policyQualifierId
-    143, // extensions.certificatePolicies.extnValue.policyQualifiers.pqualifier
-    145, // extensions.subjectKeyIdentifier.extnId
-    146, // extensions.subjectKeyIdentifier.criticial
-    149, // extensions.subjectKeyIdentifier.extnValue.subjectKeyIdentifier.keyIdentifie
-r
-].into_iter().collect());
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 enum Action {
@@ -173,20 +39,12 @@ struct State {
     payload_size: u32,
     parsed_bytes: u32,
     parsed_types: u32,
-    remaining_bytes: u8,
     byte_kind: ByteKind,
 }
 
 impl State {
     fn new() -> State {
-        State {
-            header_size: 0,
-            payload_size: 0,
-            parsed_bytes: 0,
-            parsed_types: 0,
-            type_tag: 0,
-            byte_kind: ByteKind::Type,
-        }
+        State { header_size: 0, payload_size: 0, parsed_bytes: 0, parsed_types: 0, byte_kind: ByteKind::Type }
     }
 
     fn is_type(self) -> bool {
@@ -201,8 +59,12 @@ impl State {
         self.byte_kind == ByteKind::Payload
     }
 
+    // から文字列が来たらどうする
+    // 来ない
+
     fn is_primitive(self) -> bool {
-        Circuit::PRIMITIVE_OBJECTS.contains(self.parsed_types)
+        assert!(self.parsed_types > 0);
+        Circuit::SHOULD_PARSE_PAYLOAD_AS_DER.get(self.parsed_types as usize - 1).copied().unwrap_or(false)
     }
 
     fn update(self, action: Action) -> State {
@@ -244,15 +106,13 @@ impl State {
 
         if self.byte_kind == ByteKind::Type {
             new_state.byte_kind = ByteKind::Length;
-            new_state.type_tag = match action {
-                Action::Parse(byte) => byte,
-                Action::DoNothing => 0,
-            };
             new_state.parsed_bytes = 1;
             new_state.header_size = 2;
             new_state.payload_size = 0;
             new_state.parsed_types += 1;
         } else if self.byte_kind == ByteKind::Length && new_state.parsed_bytes == new_state.header_size {
+            // TODO: HAndle the case of length 0 object.
+            // This does not appear in MyNumber card so we can safely ignore it for now.
             if self.is_primitive() {
                 new_state.byte_kind = ByteKind::Payload;
             } else {
@@ -289,13 +149,11 @@ pub struct Config {
     pub parsed_bytes: Column<Advice>,
     // How many type bytes we have parsed.
     pub parsed_types: Column<Advice>,
-    // How many bytes we have left to parse.
-    pub remaining_bytes: Column<Advice>,
     pub is_primitive: Column<Advice>,
     pub primitive_objects: TableColumn,
     pub constructed_objects: TableColumn,
-    // 0..2^(K-1)
-    pub range_check: TableColumn,
+    // 0..256
+    pub byte: TableColumn,
     pub is_below_128: Column<Advice>,
     pub public_objects: Column<Instance>,
     pub private_objects: Column<Instance>,
@@ -314,9 +172,54 @@ impl Circuit {
     const K: usize = 14;
     const BLINDING_FACTORS: usize = 6;
     const REDACTED: u64 = 1u64 << 8;
-    const PUBLIC_OBJECTS: HashSet<u32> = {
 
-    }
+    // nth item of this list constrains whether or not we should parse the payload as DER, in the case of parsed_types =
+    // n + 1. true if the object is NULL or has construted type
+    // false otherwise
+    const SHOULD_PARSE_PAYLOAD_AS_DER: Vec<bool> = vec![
+        true,  // SEQUENCE
+        true,  // tbsCertificate
+        false, // tbsCertificate.version
+        false, // tbsCertificate.serialNumber
+        true,  // tbsCertificate.signature
+        false, // tbsCertificate.signature.algorithm
+        false, // tbsCertificate.signature.parameters
+        true,  // tbsCertificate.issuer
+        true,  // tbsCertificate.issuer.countryName
+        false, // tbsCertificate.issuer.countryName.type
+        false, // tbsCertificate.issuer.countryName.value
+        true,  // tbsCertificate.issuer.organizationName
+        false, // tbsCertificate.issuer.organizationName.type
+        false, // tbsCertificate.issuer.organizationName.value
+        true,  // tbsCertificate.issuer.organizationalUnitName
+        false, // tbsCertificate.issuer.organizationalUnitName.type
+        false, // tbsCertificate.issuer.organizationalUnitName.value
+        true,  // tbsCertificate.issuer.organizationalUnitName
+        false, // tbsCertificate.issuer.organizationalUnitName.type
+        false, // tbsCertificate.issuer.organizationalUnitName.value
+        true,  // tbsCertificate.validity
+        false, // tbsCertificate.validity.notBefore
+        false, // tbsCertificate.validity.notAfter
+        true,  // tbsCertificate.subject
+        true,  // tbsCertificate.subject.countryName
+        false, // tbsCertificate.subject.countryName.type
+        false, // tbsCertificate.subject.countryName.value
+        true,  // tbsCertificate.subject.localityName
+        false, // tbsCertificate.subject.localityName.type
+        false, // tbsCertificate.subject.localityName.value
+        true,  // tbsCertificate.subject.localityName
+        false, // tbsCertificate.subject.localityName.type
+        false, // tbsCertificate.subject.localityName.value
+        true,  // tbsCertificate.subject.commonName
+        false, // tbsCertificate.subject.commonName.type
+        false, // tbsCertificate.subject.commonName.value
+        true,  // tbsCertificate.subjectPublicKeyInfo
+        true,  // tbsCertificate.subjectPublicKeyInfo.algorithm
+        false, // tbsCertificate.subjectPublicKeyInfo.algorithm.algorithm
+        false, // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters
+        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey
+        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.E
+    ];
 }
 
 impl plonk::Circuit<Fr> for Circuit {
@@ -338,11 +241,10 @@ impl plonk::Circuit<Fr> for Circuit {
             payload_size: meta.advice_column(),
             parsed_bytes: meta.advice_column(),
             parsed_types: meta.advice_column(),
-            remaining_bytes: meta.advice_column(),
             is_primitive: meta.advice_column(),
             primitive_objects: meta.lookup_table_column(),
             constructed_objects: meta.lookup_table_column(),
-            range_check: meta.lookup_table_column(),
+            byte: meta.lookup_table_column(),
             is_below_128: meta.advice_column(),
             public_objects: meta.instance_column(),
             private_objects: meta.instance_column(),
@@ -358,7 +260,6 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.payload_size);
         meta.enable_equality(config.parsed_bytes);
         meta.enable_equality(config.parsed_types);
-        meta.enable_equality(config.remaining_bytes);
         meta.enable_equality(config.is_primitive);
         meta.enable_equality(config.is_below_128);
         meta.enable_equality(config.public_objects);
@@ -399,36 +300,10 @@ impl plonk::Circuit<Fr> for Circuit {
             ]
         });
 
-        meta.create_gate("If all of is_type, is_length, is_payload is off, remaining_bytes = 0", |gate| {
-            let is_enabled = gate.query_selector(config.is_enabled);
-            let is_type = gate.query_advice(config.is_type, Rotation::cur());
-            let is_length = gate.query_advice(config.is_length, Rotation::cur());
-            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
-            let remaining_bytes = gate.query_advice(config.remaining_bytes, Rotation::cur());
-            vec![is_enabled * and::expr([not::expr(is_type), not::expr(is_length), not::expr(is_payload)]) * remaining_bytes]
-        });
-
-        meta.create_gate("If one of is_type, is_length, is_payload is on, remaining_bytes should decrement", |gate| {
-            let is_enabled = gate.query_selector(config.is_enabled);
-            let is_type = gate.query_advice(config.is_type, Rotation::cur());
-            let is_length = gate.query_advice(config.is_length, Rotation::cur());
-            let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
-            let remaining_bytes_cur = gate.query_advice(config.remaining_bytes, Rotation::cur());
-            let remaining_bytes_next = gate.query_advice(config.remaining_bytes, Rotation::next());
-            vec![is_enabled * or::expr([is_type, is_length, is_payload]) * (remaining_bytes_cur - remaining_bytes_next + Expression::Constant(Fr::one()))]
-        });
-
-        meta.lookup("remaining_bytes < 2^(K-1)", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
-            let remaining_bytes = region.query_advice(config.remaining_bytes, Rotation::cur());
-            vec![(is_enabled * remaining_bytes, config.range_check)]
-        });
-
         meta.lookup("der_byte <= 0b11111111", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
-            let left_shift = Expression::Constant(Fr::from(1 << (Self::K - 1 - 8)));
-            vec![(is_enabled * der_byte * left_shift, config.range_check)]
+            vec![(is_enabled * der_byte, config.byte)]
         });
 
         meta.lookup("parsed_types must be in primitive_objects if is_primitive is 1", |region| {
@@ -552,12 +427,14 @@ impl plonk::Circuit<Fr> for Circuit {
             let payload_size_cur = region.query_advice(config.payload_size, Rotation::cur());
             let is_length_cur = region.query_advice(config.is_length, Rotation::cur());
             let is_type_cur = region.query_advice(config.is_type, Rotation::cur());
+            // We use is_type_prev only when is_length_cur is on.
+            // Thus we will never use blinded is_type.
             let is_type_prev = region.query_advice(config.is_type, Rotation::prev());
             let is_below_128_cur = region.query_advice(config.is_below_128, Rotation::cur());
             let der_byte_cur = region.query_advice(config.der_byte, Rotation::cur());
             let should_disclose_cur = region.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
+                is_enabled.clone()
                     * (parsed_bytes_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -566,7 +443,7 @@ impl plonk::Circuit<Fr> for Circuit {
                             // otherwise, increment the register
                             parsed_bytes_cur.clone() + Expression::Constant(Fr::one()),
                         )),
-                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
+                is_enabled.clone()
                     * (parsed_types_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -575,7 +452,7 @@ impl plonk::Circuit<Fr> for Circuit {
                             // otherwise, keep the value
                             parsed_types_cur.clone(),
                         )),
-                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
+                is_enabled.clone()
                     * (header_size_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -594,7 +471,7 @@ impl plonk::Circuit<Fr> for Circuit {
                                 header_size_cur.clone(),
                             ),
                         )),
-                is_enabled.clone() * or::expr([is_type_cur.clone(), is_length_cur.clone(), is_payload_cur.clone()])
+                is_enabled.clone()
                     * (payload_size_next
                         - select::expr(
                             is_type_cur.clone(),
@@ -802,7 +679,13 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value: u64 = if Self::PRIMITIVE_OBJECTS.contains(row_index) { row_index as u64 } else { 0 };
+                    let row_value: u64 = match Self::SHOULD_PARSE_PAYLOAD_AS_DER.get(row_index) {
+                        // While we're parsing the first object, parsed_types is 1.
+                        // There will be always a 1 difference bitween the index of the object we're parsing and
+                        // parsed_types.
+                        Some(false) => row_index as u64 + 1,
+                        Some(true) | None => 0,
+                    };
                     table.assign_cell(
                         || "List of all objects of which contents are not serialized in DER",
                         config.primitive_objects,
@@ -810,7 +693,10 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value)),
                     )?;
 
-                    let row_value: u64 = if Self::PRIMITIVE_OBJECTS.contains(row_index) { 0 } else { row_index as u64 };
+                    let row_value: u64 = match Self::SHOULD_PARSE_PAYLOAD_AS_DER.get(row_index) {
+                        Some(true) | None => row_index as u64 + 1,
+                        Some(false) => 0,
+                    };
                     table.assign_cell(
                         || "List of all objects of which contents are serialized in DER",
                         config.constructed_objects,
