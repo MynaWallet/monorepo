@@ -8,7 +8,7 @@ include "./helpers/sha.circom";
 include "./helpers/extract.circom";
 
 template SelectiveDisclosure(max_cert_bytes, n, k) {
-    signal input rawTbsCert[max_cert_bytes];
+    signal input raw_tbs_cert[max_cert_bytes];
     signal input mask[max_cert_bytes];
 
     signal input message_padded_bytes;
@@ -31,7 +31,7 @@ template SelectiveDisclosure(max_cert_bytes, n, k) {
     // ======== Hash Raw TBS Certificate ========
     component sha = Sha256Bytes(max_cert_bytes);
     for (var i = 0; i < max_cert_bytes; i++) {
-        sha.in_padded[i] <== rawTbsCert[i];
+        sha.in_padded[i] <== raw_tbs_cert[i];
     }
     sha.in_len_padded_bytes <== message_padded_bytes;
 
@@ -65,7 +65,7 @@ template SelectiveDisclosure(max_cert_bytes, n, k) {
     // ======== Mask Raw TBS Certificate ========
     signal maskedTbsCert[max_cert_bytes];
     for (var i = 0; i < max_cert_bytes; i++) {
-        maskedTbsCert[i] <== rawTbsCert[i] * mask[i];
+        maskedTbsCert[i] <== raw_tbs_cert[i] * mask[i];
     }
 
     // ======== Shift Masked TBS Certificate ========
