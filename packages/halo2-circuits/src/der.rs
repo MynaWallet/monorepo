@@ -62,7 +62,7 @@ impl State {
     // から文字列が来たらどうする
     // 来ない
 
-    fn is_primitive(self) -> bool {
+    fn does_contain_der(self) -> bool {
         assert!(self.parsed_types > 0);
         Circuit::SHOULD_PARSE_PAYLOAD_AS_DER.get(self.parsed_types as usize - 1).copied().unwrap_or(false)
     }
@@ -70,13 +70,13 @@ impl State {
     fn update(self, action: Action) -> State {
         println!("");
         if let Action::Parse(byte) = action {
-            println!("der_byte: {:0x}", byte);
+            println!("der_byte: 0x{:0x}", byte);
         }
         println!("byte_kind: {:?}", self.byte_kind);
-        println!("payload_size: {:0x}", self.payload_size);
-        println!("header_size: {}", self.header_size);
-        println!("parsed_bytes: {}", self.parsed_bytes);
-        println!("parsed_types: {}", self.parsed_types);
+        println!("payload_size: 0x{:0x}", self.payload_size);
+        println!("header_size: 0x{:0x}", self.header_size);
+        println!("parsed_bytes: 0x{:0x}", self.parsed_bytes);
+        println!("parsed_types: 0x{:0x}", self.parsed_types);
 
         let mut new_state = self.clone();
         new_state.parsed_bytes += 1;
@@ -113,10 +113,12 @@ impl State {
         } else if self.byte_kind == ByteKind::Length && new_state.parsed_bytes == new_state.header_size {
             // TODO: HAndle the case of length 0 object.
             // This does not appear in MyNumber card so we can safely ignore it for now.
-            if self.is_primitive() {
-                new_state.byte_kind = ByteKind::Payload;
-            } else {
+            println!("does_contain_der: {:?}", self.does_contain_der());
+            println!("does_contain_der: {:?}", new_state.does_contain_der());
+            if self.does_contain_der() {
                 new_state.byte_kind = ByteKind::Type;
+            } else {
+                new_state.byte_kind = ByteKind::Payload;
             }
         } else if self.byte_kind == ByteKind::Payload
             && new_state.parsed_bytes == new_state.header_size + new_state.payload_size
@@ -149,7 +151,7 @@ pub struct Config {
     pub parsed_bytes: Column<Advice>,
     // How many type bytes we have parsed.
     pub parsed_types: Column<Advice>,
-    pub is_primitive: Column<Advice>,
+    pub does_contain_der: Column<Advice>,
     pub primitive_objects: TableColumn,
     pub constructed_objects: TableColumn,
     // 0..256
@@ -176,49 +178,192 @@ impl Circuit {
     // nth item of this list constrains whether or not we should parse the payload as DER, in the case of parsed_types =
     // n + 1. true if the object is NULL or has construted type
     // false otherwise
-    const SHOULD_PARSE_PAYLOAD_AS_DER: Vec<bool> = vec![
-        true,  // SEQUENCE
+    const SHOULD_PARSE_PAYLOAD_AS_DER: [bool; 183] = [
         true,  // tbsCertificate
-        false, // tbsCertificate.version
+        true,  // tbsCertificate.version
+        false, // tbsCertificate.version.
         false, // tbsCertificate.serialNumber
         true,  // tbsCertificate.signature
         false, // tbsCertificate.signature.algorithm
-        false, // tbsCertificate.signature.parameters
+        true,  /* tbsCertificate.signature.parameters  This object has type NULL thus there's no payload. In this
+                * case SHOULD_PARSE_PAYLOAD_AS_DER must be true because the byte after the end of the length bytes
+                * is the beginning of next DER. Maybe we should handle this case explicitly? */
         true,  // tbsCertificate.issuer
-        true,  // tbsCertificate.issuer.countryName
-        false, // tbsCertificate.issuer.countryName.type
-        false, // tbsCertificate.issuer.countryName.value
-        true,  // tbsCertificate.issuer.organizationName
-        false, // tbsCertificate.issuer.organizationName.type
-        false, // tbsCertificate.issuer.organizationName.value
-        true,  // tbsCertificate.issuer.organizationalUnitName
-        false, // tbsCertificate.issuer.organizationalUnitName.type
-        false, // tbsCertificate.issuer.organizationalUnitName.value
-        true,  // tbsCertificate.issuer.organizationalUnitName
-        false, // tbsCertificate.issuer.organizationalUnitName.type
-        false, // tbsCertificate.issuer.organizationalUnitName.value
+        true,  // tbsCertificate.issuer[0]
+        true,  // tbsCertificate.issuer[0][0]
+        false, // tbsCertificate.issuer[0][0].type
+        false, // tbsCertificate.issuer[0][0].value
+        true,  // tbsCertificate.issuer[1]
+        true,  // tbsCertificate.issuer[1][0]
+        false, // tbsCertificate.issuer[1][0].type
+        false, // tbsCertificate.issuer[1][0].value
+        true,  // tbsCertificate.issuer[2]
+        true,  // tbsCertificate.issuer[2][0]
+        false, // tbsCertificate.issuer[2][0].type
+        false, // tbsCertificate.issuer[2][0].value
+        true,  // tbsCertificate.issuer[3]
+        true,  // tbsCertificate.issuer[3][0]
+        false, // tbsCertificate.issuer[3][0].type
+        false, // tbsCertificate.issuer[3][0].value
         true,  // tbsCertificate.validity
         false, // tbsCertificate.validity.notBefore
         false, // tbsCertificate.validity.notAfter
         true,  // tbsCertificate.subject
-        true,  // tbsCertificate.subject.countryName
-        false, // tbsCertificate.subject.countryName.type
-        false, // tbsCertificate.subject.countryName.value
-        true,  // tbsCertificate.subject.localityName
-        false, // tbsCertificate.subject.localityName.type
-        false, // tbsCertificate.subject.localityName.value
-        true,  // tbsCertificate.subject.localityName
-        false, // tbsCertificate.subject.localityName.type
-        false, // tbsCertificate.subject.localityName.value
-        true,  // tbsCertificate.subject.commonName
-        false, // tbsCertificate.subject.commonName.type
-        false, // tbsCertificate.subject.commonName.value
+        true,  // tbsCertificate.subject[0]
+        true,  // tbsCertificate.subject[0][0]
+        false, // tbsCertificate.subject[0][0].type
+        false, // tbsCertificate.subject[0][0].value
+        true,  // tbsCertificate.subject[1]
+        true,  // tbsCertificate.subject[1][0]
+        false, // tbsCertificate.subject[1][0].type
+        false, // tbsCertificate.subject[1][0].value
+        true,  // tbsCertificate.subject[2]
+        true,  // tbsCertificate.subject[2][0]
+        false, // tbsCertificate.subject[2][0].type
+        false, // tbsCertificate.subject[2][0].value
+        true,  // tbsCertificate.subject[3]
+        true,  // tbsCertificate.subject[3][0]
+        false, // tbsCertificate.subject[3][0].type
+        false, // tbsCertificate.subject[3][0].value
         true,  // tbsCertificate.subjectPublicKeyInfo
         true,  // tbsCertificate.subjectPublicKeyInfo.algorithm
         false, // tbsCertificate.subjectPublicKeyInfo.algorithm.algorithm
-        false, // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters
-        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey
-        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey.E
+        true,  // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters NULL
+        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey BIT STRING
+        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey SEQUENCE
+        false, // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey[0]
+        false, // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey[1]
+        true,  // tbsCertificate.extensions
+        true,  // tbsCertificate.extensions SEQUENCE
+        true,  // tbsCertificate.extensions.keyUsage
+        false, // tbsCertificate.extensions.keyUsage.extnID
+        false, // tbsCertificate.extensions.keyUsage.critical
+        true,  // tbsCertificate.extensions.keyUsage.extnValue
+        false, // tbsCertificate.extensions.keyUsage.extnValue BIT STRING
+        true,  // tbsCertificate.extensions.subjectAltName
+        false, // tbsCertificate.extensions.subjectAltName.extnID
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue OCTET STRING
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue SEQUENCE
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[0]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[0].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[0].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[0].value UTF8String
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[1]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[1].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[1].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[1].value UTF8String
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[2]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[2].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[2].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[2].value UTF8String
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[3]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[3].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[3].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[3].value UTF8String
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[4]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[4].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[4].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[4].value UTF8String
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[5]
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[5].type
+        true,  // tbsCertificate.extensions.subjectAltName.extnValue[5].value constructed
+        false, // tbsCertificate.extensions.subjectAltName.extnValue[5].value UTF8String
+        true,  // tbsCertificate.extensions.certificatePolicies
+        false, // tbsCertificate.extensions.certificatePolicies.extnID
+        false, // tbsCertificate.extensions.certificatePolicies.critical
+        true,  // tbsCertificate.extensions.certificatePolicies.extnValue OCTET STRING
+        true,  // tbsCertificate.extensions.certificatePolicies.extnValue SEQUENCE
+        true,  // tbsCertificate.extensions.certificatePolicies.extnValue SEQUENCE
+        false, // tbsCertificate.extensions.certificatePolicies.extnValue OBJECT IDENTIFIER
+        true,  // tbsCertificate.extensions.certificatePolicies.extnValue
+        true,  // tbsCertificate.extensions.certificatePolicies.extnValue
+        false, // tbsCertificate.extensions.certificatePolicies.extnValue
+        false, // tbsCertificate.extensions.certificatePolicies.extnValue
+        true,  // tbsCertificate.extensions.issuerAltName
+        false, // tbsCertificate.extensions.issuerAltName.extnID
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[0]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[0]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[0]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[0]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[1]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[1]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[1]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[1]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[2]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[2]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[2]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[2]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[3]
+        true,  // tbsCertificate.extensions.issuerAltName.extnValue[3]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[3]
+        false, // tbsCertificate.extensions.issuerAltName.extnValue[3]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnID
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
+        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
+        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnID
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[0]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
+        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[2]
+        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
+        true,  // tbsCertificate.extensions.subjectKeyIdentifier
+        false, // tbsCertificate.extensions.subjectKeyIdentifier.extnID
+        true,  // tbsCertificate.extensions.subjectKeyIdentifier.extnValue
+        false, // tbsCertificate.extensions.subjectKeyIdentifier.extnValue
     ];
 }
 
@@ -241,7 +386,7 @@ impl plonk::Circuit<Fr> for Circuit {
             payload_size: meta.advice_column(),
             parsed_bytes: meta.advice_column(),
             parsed_types: meta.advice_column(),
-            is_primitive: meta.advice_column(),
+            does_contain_der: meta.advice_column(),
             primitive_objects: meta.lookup_table_column(),
             constructed_objects: meta.lookup_table_column(),
             byte: meta.lookup_table_column(),
@@ -260,7 +405,7 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.payload_size);
         meta.enable_equality(config.parsed_bytes);
         meta.enable_equality(config.parsed_types);
-        meta.enable_equality(config.is_primitive);
+        meta.enable_equality(config.does_contain_der);
         meta.enable_equality(config.is_below_128);
         meta.enable_equality(config.public_objects);
         meta.enable_equality(config.private_objects);
@@ -272,14 +417,14 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
-            let is_primitive = gate.query_advice(config.is_primitive, Rotation::cur());
+            let does_contain_der = gate.query_advice(config.does_contain_der, Rotation::cur());
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
                 is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
                 is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
                 is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                is_primitive.clone() * (is_primitive.clone() - Expression::Constant(Fr::one())),
+                does_contain_der.clone() * (does_contain_der.clone() - Expression::Constant(Fr::one())),
                 is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
                 should_disclose.clone() * (should_disclose.clone() - Expression::Constant(Fr::one())),
             ]
@@ -306,19 +451,18 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![(is_enabled * der_byte, config.byte)]
         });
 
-        meta.lookup("parsed_types must be in primitive_objects if is_primitive is 1", |region| {
+        meta.lookup("parsed_types must be in primitive_objects if does_contain_der is 0", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            vec![(is_enabled * is_primitive * parsed_types, config.primitive_objects)]
+            let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
+            vec![(is_enabled * not::expr(does_contain_der) * parsed_types, config.primitive_objects)]
         });
 
-        meta.lookup("parsed_types must be in constructed_objects if is_primitive is 0", |region| {
+        meta.lookup("parsed_types must be in constructed_objects if does_contain_der is 1", |region| {
             let is_enabled = region.query_selector(config.is_enabled);
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let is_primitive = region.query_advice(config.is_primitive, Rotation::cur());
-            let is_constructed = Expression::Constant(Fr::one()) - is_primitive;
-            vec![(is_enabled * not::expr(is_primitive) * parsed_types, config.constructed_objects)]
+            let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
+            vec![(is_enabled * does_contain_der * parsed_types, config.constructed_objects)]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
@@ -371,7 +515,7 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_length_cur = region.query_advice(config.is_length, Rotation::cur());
             let is_type_next = region.query_advice(config.is_type, Rotation::next());
             let is_type_cur = region.query_advice(config.is_type, Rotation::cur());
-            let is_primitive_next = region.query_advice(config.is_primitive, Rotation::next());
+            let does_contain_der_next = region.query_advice(config.does_contain_der, Rotation::next());
             let header_size_next = region.query_advice(config.header_size, Rotation::next());
             vec![
                 // If is_type is turned on, the previous is_type must be turned off.
@@ -383,19 +527,19 @@ impl plonk::Circuit<Fr> for Circuit {
                 // If is_payload is turned on, the previous is_type must be turned off.
                 // Because there's no such case that a payload byte follows a type byte.
                 is_enabled.clone() * is_payload_next.clone() * is_type_cur.clone(),
-                // If is_length_cur = 1 && is_length_next = 0 && is_primitive_next = 1, then is_payload_next must be 1
-                // Because in a primitive object payload bytes follows length bytes
+                // If is_length_cur = 1 && is_length_next = 0 && does_contain_der_next = 0, then is_payload_next must
+                // be 1 Because in a primitive object payload bytes follows length bytes
                 is_enabled.clone()
                     * is_length_cur.clone()
                     * not::expr(is_length_next.clone())
-                    * is_primitive_next.clone()
+                    * not::expr(does_contain_der_next.clone())
                     * not::expr(is_payload_next.clone()),
-                // If is_length_cur = 1 && is_length_next = 0 && is_primitive_next = 0, then is_type_next must be 1
+                // If is_length_cur = 1 && is_length_next = 0 && does_contain_der_next = 1, then is_type_next must be 1
                 // Because in an object that's not primitive a type byte follows length bytes
                 is_enabled.clone()
                     * is_length_cur.clone()
                     * not::expr(is_length_next.clone())
-                    * not::expr(is_primitive_next.clone())
+                    * does_contain_der_next.clone()
                     * not::expr(is_type_next.clone()),
                 // If is_length_cur = 1 && is_length_next = 0, then parsed_bytes must equal header_size
                 // This is to prevent an attacker from stop parsing length bytes early.
@@ -556,10 +700,10 @@ impl plonk::Circuit<Fr> for Circuit {
                     Fr::from(state.parsed_types as u64),
                 )?;
                 region.assign_advice_from_constant(
-                    || "Assign is_primitive",
-                    config.is_primitive,
+                    || "Assign does_contain_der",
+                    config.does_contain_der,
                     0,
-                    Fr::from(state.is_primitive()),
+                    Fr::from(state.does_contain_der()),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign should_disclose",
@@ -636,10 +780,10 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(state.parsed_types as u64)),
                     )?;
                     region.assign_advice(
-                        || "Assign is_primitive",
-                        config.is_primitive,
+                        || "Assign does_contain_der",
+                        config.does_contain_der,
                         row_index,
-                        || Value::known(Fr::from(state.is_primitive())),
+                        || Value::known(Fr::from(state.does_contain_der())),
                     )?;
                     region.assign_advice(
                         || "Assign should_disclose",
@@ -694,6 +838,7 @@ impl plonk::Circuit<Fr> for Circuit {
                     )?;
 
                     let row_value: u64 = match Self::SHOULD_PARSE_PAYLOAD_AS_DER.get(row_index) {
+                        // If we're done parsing does_contain_der must be 0
                         Some(true) | None => row_index as u64 + 1,
                         Some(false) => 0,
                     };
@@ -727,82 +872,11 @@ mod tests {
 
     #[test]
     fn der() {
-        let mut der_bytes = vec![
-            0x30, 0x82, 0x5, 0x16, 0xA0, 0x3, 0x2, 0x1, 0x2, 0x2, 0x4, 0x1, 0x8C, 0x45, 0x3E, 0x30, 0xD, 0x6, 0x9,
-            0x2A, 0x86, 0x48, 0x86, 0xF7, 0xD, 0x1, 0x1, 0xB, 0x5, 0x0, 0x30, 0x81, 0x82, 0x31, 0xB, 0x30, 0x9, 0x6,
-            0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30, 0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A,
-            0x50, 0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49,
-            0x20, 0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69,
-            0x63, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x3D, 0x30, 0x3B, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x34, 0x4A,
-            0x61, 0x70, 0x61, 0x6E, 0x20, 0x41, 0x67, 0x65, 0x6E, 0x63, 0x79, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x4C, 0x6F,
-            0x63, 0x61, 0x6C, 0x20, 0x41, 0x75, 0x74, 0x68, 0x6F, 0x72, 0x69, 0x74, 0x79, 0x20, 0x49, 0x6E, 0x66, 0x6F,
-            0x72, 0x6D, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6D, 0x73, 0x30, 0x1E, 0x17,
-            0xD, 0x32, 0x30, 0x30, 0x35, 0x31, 0x39, 0x31, 0x37, 0x33, 0x38, 0x35, 0x35, 0x5A, 0x17, 0xD, 0x32, 0x34,
-            0x31, 0x32, 0x30, 0x37, 0x31, 0x34, 0x35, 0x39, 0x35, 0x39, 0x5A, 0x30, 0x2F, 0x31, 0xB, 0x30, 0x9, 0x6,
-            0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0x20, 0x30, 0x1E, 0x6, 0x3, 0x55, 0x4, 0x3, 0xC, 0x17,
-            0x33, 0x30, 0x38, 0x30, 0x31, 0x34, 0x45, 0x34, 0x35, 0x4A, 0x45, 0x46, 0x49, 0x47, 0x31, 0x34, 0x31, 0x30,
-            0x34, 0x30, 0x30, 0x33, 0x41, 0x30, 0x82, 0x1, 0x22, 0x30, 0xD, 0x6, 0x9, 0x2A, 0x86, 0x48, 0x86, 0xF7,
-            0xD, 0x1, 0x1, 0x1, 0x5, 0x0, 0x3, 0x82, 0x1, 0xF, 0x0, 0x30, 0x82, 0x1, 0xA, 0x2, 0x82, 0x1, 0x1, 0x0,
-            0xB2, 0x37, 0xE1, 0xD, 0xE3, 0xAB, 0xAF, 0x29, 0xAE, 0xCA, 0x23, 0xC2, 0xA, 0x55, 0x2B, 0xD3, 0x25, 0x14,
-            0x6C, 0x7, 0x56, 0xFC, 0x5B, 0x9, 0x7B, 0x99, 0x1E, 0x7E, 0xC5, 0x69, 0x55, 0x1E, 0xBB, 0x1D, 0xB9, 0x7B,
-            0x71, 0x3D, 0x7C, 0x66, 0x62, 0x4D, 0x78, 0xAF, 0xF9, 0x6, 0x8C, 0x12, 0xE4, 0x41, 0xDD, 0xD1, 0x85, 0x21,
-            0xA4, 0x2F, 0x69, 0xD8, 0x5C, 0x9A, 0xC, 0xEE, 0x70, 0x7C, 0x92, 0x6D, 0x2, 0xEA, 0x7, 0x58, 0x8D, 0x39,
-            0x17, 0x33, 0x4, 0xD9, 0x1D, 0xE3, 0x1, 0x73, 0x2E, 0xAF, 0xBA, 0x90, 0xCB, 0xD7, 0xA0, 0xA4, 0x16, 0xB3,
-            0x3A, 0x54, 0x4A, 0x15, 0x95, 0x30, 0xA9, 0x1A, 0xA6, 0xB8, 0xC5, 0x2E, 0x4C, 0x60, 0xEA, 0x51, 0x20, 0x76,
-            0xB4, 0xCA, 0x8F, 0x9D, 0x61, 0x53, 0x2A, 0xFE, 0x9A, 0x61, 0x24, 0xD4, 0xBB, 0x86, 0xDA, 0xC4, 0x9A, 0xC2,
-            0x69, 0x4B, 0xA3, 0xE4, 0x29, 0x73, 0xBE, 0x8B, 0x1, 0x74, 0x50, 0xA7, 0xF1, 0xA4, 0x9A, 0x64, 0x56, 0x4E,
-            0x71, 0x34, 0x82, 0xD7, 0xD3, 0x2D, 0x4, 0xFB, 0x45, 0xF5, 0x69, 0xD9, 0x86, 0xD6, 0xF1, 0xCC, 0xC4, 0x4B,
-            0x7B, 0x71, 0xB2, 0x7B, 0x5D, 0x86, 0x41, 0x15, 0xC, 0x11, 0x6F, 0x85, 0xAA, 0x11, 0x5D, 0xCE, 0xDC, 0xE7,
-            0xA5, 0xF0, 0xC6, 0x5F, 0x4, 0x8E, 0xCB, 0xD3, 0xA6, 0x54, 0xC2, 0xFF, 0xE5, 0x14, 0xEC, 0xA3, 0x52, 0x60,
-            0x27, 0xD1, 0x7F, 0x12, 0xCF, 0x4, 0x4B, 0x92, 0xCA, 0x73, 0xA5, 0x41, 0xA2, 0x20, 0xA1, 0xBE, 0xA3, 0xF9,
-            0x2D, 0xC4, 0x52, 0x1, 0x52, 0x3B, 0xB2, 0xAF, 0x12, 0x89, 0x4C, 0xC9, 0x81, 0xB1, 0x5D, 0xB1, 0x9F, 0x46,
-            0xAA, 0x28, 0x6C, 0x1D, 0x68, 0x3A, 0x2D, 0x43, 0x81, 0x31, 0x56, 0x9E, 0x9F, 0xFA, 0x14, 0xCD, 0x37, 0xD5,
-            0xF5, 0xD4, 0x61, 0x37, 0x2, 0x3, 0x1, 0x0, 0x1, 0xA3, 0x82, 0x2, 0xFC, 0x30, 0x82, 0x2, 0xF8, 0x30, 0xE,
-            0x6, 0x3, 0x55, 0x1D, 0xF, 0x1, 0x1, 0xFF, 0x4, 0x4, 0x3, 0x2, 0x7, 0x80, 0x30, 0x13, 0x6, 0x3, 0x55, 0x1D,
-            0x25, 0x4, 0xC, 0x30, 0xA, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x3, 0x2, 0x30, 0x49, 0x6, 0x3, 0x55,
-            0x1D, 0x20, 0x1, 0x1, 0xFF, 0x4, 0x3F, 0x30, 0x3D, 0x30, 0x3B, 0x6, 0xB, 0x2A, 0x83, 0x8, 0x8C, 0x9B, 0x55,
-            0x8, 0x5, 0x1, 0x3, 0x1E, 0x30, 0x2C, 0x30, 0x2A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x2, 0x1, 0x16,
-            0x1E, 0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x77, 0x77, 0x77, 0x2E, 0x6A, 0x70, 0x6B, 0x69, 0x2E, 0x67,
-            0x6F, 0x2E, 0x6A, 0x70, 0x2F, 0x63, 0x70, 0x73, 0x2E, 0x68, 0x74, 0x6D, 0x6C, 0x30, 0x81, 0xB7, 0x6, 0x3,
-            0x55, 0x1D, 0x12, 0x4, 0x81, 0xAF, 0x30, 0x81, 0xAC, 0xA4, 0x81, 0xA9, 0x30, 0x81, 0xA6, 0x31, 0xB, 0x30,
-            0x9, 0x6, 0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0x27, 0x30, 0x25, 0x6, 0x3, 0x55, 0x4, 0xA,
-            0xC, 0x1E, 0xE5, 0x85, 0xAC, 0xE7, 0x9A, 0x84, 0xE5, 0x80, 0x8B, 0xE4, 0xBA, 0xBA, 0xE8, 0xAA, 0x8D, 0xE8,
-            0xA8, 0xBC, 0xE3, 0x82, 0xB5, 0xE3, 0x83, 0xBC, 0xE3, 0x83, 0x93, 0xE3, 0x82, 0xB9, 0x31, 0x39, 0x30, 0x37,
-            0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x30, 0xE5, 0x85, 0xAC, 0xE7, 0x9A, 0x84, 0xE5, 0x80, 0x8B, 0xE4, 0xBA,
-            0xBA, 0xE8, 0xAA, 0x8D, 0xE8, 0xA8, 0xBC, 0xE3, 0x82, 0xB5, 0xE3, 0x83, 0xBC, 0xE3, 0x83, 0x93, 0xE3, 0x82,
-            0xB9, 0xE5, 0x88, 0xA9, 0xE7, 0x94, 0xA8, 0xE8, 0x80, 0x85, 0xE8, 0xA8, 0xBC, 0xE6, 0x98, 0x8E, 0xE7, 0x94,
-            0xA8, 0x31, 0x33, 0x30, 0x31, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x2A, 0xE5, 0x9C, 0xB0, 0xE6, 0x96, 0xB9,
-            0xE5, 0x85, 0xAC, 0xE5, 0x85, 0xB1, 0xE5, 0x9B, 0xA3, 0xE4, 0xBD, 0x93, 0xE6, 0x83, 0x85, 0xE5, 0xA0, 0xB1,
-            0xE3, 0x82, 0xB7, 0xE3, 0x82, 0xB9, 0xE3, 0x83, 0x86, 0xE3, 0x83, 0xA0, 0xE6, 0xA9, 0x9F, 0xE6, 0xA7, 0x8B,
-            0x30, 0x81, 0xBB, 0x6, 0x3, 0x55, 0x1D, 0x1F, 0x4, 0x81, 0xB3, 0x30, 0x81, 0xB0, 0x30, 0x81, 0xAD, 0xA0,
-            0x81, 0xAA, 0xA0, 0x81, 0xA7, 0xA4, 0x81, 0xA4, 0x30, 0x81, 0xA1, 0x31, 0xB, 0x30, 0x9, 0x6, 0x3, 0x55,
-            0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30, 0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A, 0x50,
-            0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49, 0x20,
-            0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69, 0x63,
-            0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x20, 0x30, 0x1E, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x17, 0x43, 0x52,
-            0x4C, 0x20, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x50, 0x6F, 0x69,
-            0x6E, 0x74, 0x73, 0x31, 0x15, 0x30, 0x13, 0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0xC, 0x4B, 0x61, 0x6E, 0x61, 0x67,
-            0x61, 0x77, 0x61, 0x2D, 0x6B, 0x65, 0x6E, 0x31, 0x23, 0x30, 0x21, 0x6, 0x3, 0x55, 0x4, 0x3, 0xC, 0x1A,
-            0x59, 0x6F, 0x6B, 0x6F, 0x68, 0x61, 0x6D, 0x61, 0x2D, 0x73, 0x68, 0x69, 0x2D, 0x4E, 0x61, 0x6B, 0x61, 0x2D,
-            0x6B, 0x75, 0x20, 0x43, 0x52, 0x4C, 0x44, 0x50, 0x30, 0x3A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x1,
-            0x1, 0x4, 0x2E, 0x30, 0x2C, 0x30, 0x2A, 0x6, 0x8, 0x2B, 0x6, 0x1, 0x5, 0x5, 0x7, 0x30, 0x1, 0x86, 0x1E,
-            0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F, 0x6F, 0x63, 0x73, 0x70, 0x61, 0x75, 0x74, 0x68, 0x6E, 0x6F, 0x72,
-            0x6D, 0x2E, 0x6A, 0x70, 0x6B, 0x69, 0x2E, 0x67, 0x6F, 0x2E, 0x6A, 0x70, 0x30, 0x81, 0xB2, 0x6, 0x3, 0x55,
-            0x1D, 0x23, 0x4, 0x81, 0xAA, 0x30, 0x81, 0xA7, 0x80, 0x14, 0x8C, 0xD5, 0x58, 0x6A, 0x89, 0x14, 0x85, 0xE5,
-            0x59, 0x37, 0x9B, 0x7E, 0x29, 0xD4, 0x10, 0xCF, 0xD2, 0x8B, 0x35, 0x93, 0xA1, 0x81, 0x88, 0xA4, 0x81, 0x85,
-            0x30, 0x81, 0x82, 0x31, 0xB, 0x30, 0x9, 0x6, 0x3, 0x55, 0x4, 0x6, 0x13, 0x2, 0x4A, 0x50, 0x31, 0xD, 0x30,
-            0xB, 0x6, 0x3, 0x55, 0x4, 0xA, 0xC, 0x4, 0x4A, 0x50, 0x4B, 0x49, 0x31, 0x25, 0x30, 0x23, 0x6, 0x3, 0x55,
-            0x4, 0xB, 0xC, 0x1C, 0x4A, 0x50, 0x4B, 0x49, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x75, 0x73, 0x65, 0x72, 0x20,
-            0x61, 0x75, 0x74, 0x68, 0x65, 0x6E, 0x74, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x31, 0x3D, 0x30, 0x3B,
-            0x6, 0x3, 0x55, 0x4, 0xB, 0xC, 0x34, 0x4A, 0x61, 0x70, 0x61, 0x6E, 0x20, 0x41, 0x67, 0x65, 0x6E, 0x63,
-            0x79, 0x20, 0x66, 0x6F, 0x72, 0x20, 0x4C, 0x6F, 0x63, 0x61, 0x6C, 0x20, 0x41, 0x75, 0x74, 0x68, 0x6F, 0x72,
-            0x69, 0x74, 0x79, 0x20, 0x49, 0x6E, 0x66, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x20, 0x53, 0x79,
-            0x73, 0x74, 0x65, 0x6D, 0x73, 0x82, 0x4, 0x1, 0x33, 0xC3, 0x49, 0x30, 0x1D, 0x6, 0x3, 0x55, 0x1D, 0xE, 0x4,
-            0x16, 0x4, 0x14, 0x2, 0x0, 0x88, 0xB4, 0xD3, 0x14, 0xA7, 0x75, 0x5D, 0x28, 0xEC, 0x1B, 0x9, 0x9E, 0xC4,
-            0x5E, 0x2F, 0xEE, 0xF9, 0x92,
-        ];
+        let mut der_hex: String = std::env::var("SIGNER_CERTIFICATE")
+            .expect("You must set $SIGNER_CERTIFICATE the certificate to use in the test");
+        let mut der_bytes = hex::decode(der_hex).expect("Invalid $SIGNER_CERTIFICATE");
         der_bytes.extend(vec![0; (1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS - der_bytes.len()]);
-        let circuit = super::Circuit { der_bytes, public_objects: HashSet::from_iter(vec![3]) };
+        let circuit = super::Circuit { der_bytes, public_objects: HashSet::from_iter(vec![65]) };
 
         let instance_columns: Vec<Vec<Fr>> = vec![
             (0..(1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS)

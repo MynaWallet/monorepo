@@ -2371,6 +2371,7 @@ dependencies = [
  "halo2-rsa",
  "halo2-sha256-unoptimized",
  "halo2_proofs 0.2.0 (git+https://github.com/privacy-scaling-explorations/halo2.git?tag=v2023_04_20)",
+ "hex",
  "itertools 0.11.0",
  "num-bigint",
  "num-traits",
