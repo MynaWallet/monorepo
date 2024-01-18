@@ -7,6 +7,49 @@ use halo2_proofs::{
 use std::collections::HashSet;
 use zkevm_gadgets::util::*;
 
+const K: usize = 14;
+const REDACTED: u32 = 1u32 << 8;
+
+// The lookup table that represents how the circuit should traverse DER.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathTable {
+    // ith element of this Vec represents whether or not we should disclose an object when parsed_types = i
+    should_disclose: Vec<bool>,
+    // ith element of this Vec represents whether or not we should parse the contents bytes as DER when parsed_types=i
+    should_visit: Vec<bool>,
+}
+
+impl PathTable {
+    // This method currently supports disclosing only one object.
+    // TODO: Support multiple paths
+    fn new(path: &[u32]) -> Self {
+        let public_object = 1u32 + path.iter().map(|x| x + 1).sum::<u32>();
+        // In the case of parsed_types = 0, should_disclose must be false because it's the root object.
+        // If we wanna disclose all contents of the root object there's no point in selective disclosure.
+        let mut should_disclose = vec![false; public_object as usize];
+        should_disclose.push(true);
+
+        // In the case of parsed_types = 0, should_visit does not matter because it means we're on the first row of the circuit and it's byte_kind is always Type.
+        // In the case of parsed_types = 1, we must always visit it
+        let mut should_visit = vec![true; 2];
+        for x in path {
+            should_visit.extend(vec![false; *x as usize]);
+            should_visit.push(true);
+        }
+
+        Self { should_disclose, should_visit }
+    }
+
+    fn should_disclose(&self, parsed_types: u32) -> bool {
+        // In the case of should_disclose[parsed_types] being undefined, we should hide the object.
+        self.should_disclose.get(parsed_types as usize).copied().unwrap_or(false)
+    }
+
+    fn should_visit(&self, parsed_types: u32) -> bool {
+        self.should_visit.get(parsed_types as usize).copied().unwrap_or(true)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 enum Action {
     Parse(u8),
@@ -33,18 +76,28 @@ enum ByteKind {
     Payload,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct State {
+    path_table: PathTable,
     header_size: u32,
     payload_size: u32,
     parsed_bytes: u32,
     parsed_types: u32,
     byte_kind: ByteKind,
+    disclosure: u32,
 }
 
 impl State {
-    fn new() -> State {
-        State { header_size: 0, payload_size: 0, parsed_bytes: 0, parsed_types: 0, byte_kind: ByteKind::Type }
+    fn new(path: &[u32]) -> State {
+        State {
+            path_table: PathTable::new(&path),
+            header_size: 0,
+            payload_size: 0,
+            parsed_bytes: 0,
+            parsed_types: 0,
+            byte_kind: ByteKind::Type,
+            disclosure: REDACTED,
+        }
     }
 
     fn is_type(self) -> bool {
@@ -57,14 +110,6 @@ impl State {
 
     fn is_payload(self) -> bool {
         self.byte_kind == ByteKind::Payload
-    }
-
-    // から文字列が来たらどうする
-    // 来ない
-
-    fn does_contain_der(self) -> bool {
-        assert!(self.parsed_types > 0);
-        Circuit::SHOULD_PARSE_PAYLOAD_AS_DER.get(self.parsed_types as usize - 1).copied().unwrap_or(false)
     }
 
     fn update(self, action: Action) -> State {
@@ -113,9 +158,7 @@ impl State {
         } else if self.byte_kind == ByteKind::Length && new_state.parsed_bytes == new_state.header_size {
             // TODO: HAndle the case of length 0 object.
             // This does not appear in MyNumber card so we can safely ignore it for now.
-            println!("does_contain_der: {:?}", self.does_contain_der());
-            println!("does_contain_der: {:?}", new_state.does_contain_der());
-            if self.does_contain_der() {
+            if self.should_visit() {
                 new_state.byte_kind = ByteKind::Type;
             } else {
                 new_state.byte_kind = ByteKind::Payload;
@@ -128,12 +171,20 @@ impl State {
 
         new_state
     }
+
+    fn should_diclose(&self) -> bool {
+        self.path_table.should_disclose(self.parsed_types)
+    }
+
+    fn should_visit(&self) -> bool {
+        self.path_table.should_visit(self.parsed_types)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
     // 0 for blinded rows. 1 otherwise.
-    pub is_enabled: Selector,
+    pub is_enabled: Column<Fixed>,
     // The DER we're parsing. each cell corresponds to a byte.
     pub der_byte: Column<Advice>,
     // 1 if the byte we're parsing is in a position where the type tag should be.
@@ -160,86 +211,34 @@ pub struct Config {
     pub public_objects: Column<Instance>,
     pub private_objects: Column<Instance>,
     pub should_disclose: Column<Advice>,
-    pub disclosure: Column<Instance>,
+    pub disclosure: Column<Advice>,
     pub constants: Column<Fixed>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Circuit {
+    path: Vec<u32>,
     der_bytes: Vec<u8>,
-    public_objects: HashSet<u32>,
 }
 
 impl Circuit {
-    const K: usize = 14;
     const BLINDING_FACTORS: usize = 6;
-    const REDACTED: u64 = 1u64 << 8;
 
     // nth item of this list constrains whether or not we should parse the payload as DER, in the case of parsed_types =
     // n + 1. true if the object is NULL or has construted type
     // false otherwise
-    const SHOULD_PARSE_PAYLOAD_AS_DER: [bool; 183] = [
+    const SHOULD_PARSE_PAYLOAD_AS_DER: [bool; 44] = [
         true,  // tbsCertificate
-        true,  // tbsCertificate.version
-        false, // tbsCertificate.version.
+        false, // tbsCertificate.version
         false, // tbsCertificate.serialNumber
-        true,  // tbsCertificate.signature
-        false, // tbsCertificate.signature.algorithm
-        true,  /* tbsCertificate.signature.parameters  This object has type NULL thus there's no payload. In this
-                * case SHOULD_PARSE_PAYLOAD_AS_DER must be true because the byte after the end of the length bytes
-                * is the beginning of next DER. Maybe we should handle this case explicitly? */
-        true,  // tbsCertificate.issuer
-        true,  // tbsCertificate.issuer[0]
-        true,  // tbsCertificate.issuer[0][0]
-        false, // tbsCertificate.issuer[0][0].type
-        false, // tbsCertificate.issuer[0][0].value
-        true,  // tbsCertificate.issuer[1]
-        true,  // tbsCertificate.issuer[1][0]
-        false, // tbsCertificate.issuer[1][0].type
-        false, // tbsCertificate.issuer[1][0].value
-        true,  // tbsCertificate.issuer[2]
-        true,  // tbsCertificate.issuer[2][0]
-        false, // tbsCertificate.issuer[2][0].type
-        false, // tbsCertificate.issuer[2][0].value
-        true,  // tbsCertificate.issuer[3]
-        true,  // tbsCertificate.issuer[3][0]
-        false, // tbsCertificate.issuer[3][0].type
-        false, // tbsCertificate.issuer[3][0].value
-        true,  // tbsCertificate.validity
-        false, // tbsCertificate.validity.notBefore
-        false, // tbsCertificate.validity.notAfter
-        true,  // tbsCertificate.subject
-        true,  // tbsCertificate.subject[0]
-        true,  // tbsCertificate.subject[0][0]
-        false, // tbsCertificate.subject[0][0].type
-        false, // tbsCertificate.subject[0][0].value
-        true,  // tbsCertificate.subject[1]
-        true,  // tbsCertificate.subject[1][0]
-        false, // tbsCertificate.subject[1][0].type
-        false, // tbsCertificate.subject[1][0].value
-        true,  // tbsCertificate.subject[2]
-        true,  // tbsCertificate.subject[2][0]
-        false, // tbsCertificate.subject[2][0].type
-        false, // tbsCertificate.subject[2][0].value
-        true,  // tbsCertificate.subject[3]
-        true,  // tbsCertificate.subject[3][0]
-        false, // tbsCertificate.subject[3][0].type
-        false, // tbsCertificate.subject[3][0].value
-        true,  // tbsCertificate.subjectPublicKeyInfo
-        true,  // tbsCertificate.subjectPublicKeyInfo.algorithm
-        false, // tbsCertificate.subjectPublicKeyInfo.algorithm.algorithm
-        true,  // tbsCertificate.subjectPublicKeyInfo.algorithm.parameters NULL
-        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey BIT STRING
-        true,  // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey SEQUENCE
-        false, // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey[0]
-        false, // tbsCertificate.subjectPublicKeyInfo.subjectPublicKey[1]
+        false, // tbsCertificate.signature
+        false, // tbsCertificate.issuer
+        false, // tbsCertificate.validity
+        false, // tbsCertificate.subject
+        false, // tbsCertificate.subjectPublicKeyInfo
         true,  // tbsCertificate.extensions
         true,  // tbsCertificate.extensions SEQUENCE
-        true,  // tbsCertificate.extensions.keyUsage
-        false, // tbsCertificate.extensions.keyUsage.extnID
-        false, // tbsCertificate.extensions.keyUsage.critical
-        true,  // tbsCertificate.extensions.keyUsage.extnValue
-        false, // tbsCertificate.extensions.keyUsage.extnValue BIT STRING
+        false, // tbsCertificate.extensions.keyUsage
         true,  // tbsCertificate.extensions.subjectAltName
         false, // tbsCertificate.extensions.subjectAltName.extnID
         true,  // tbsCertificate.extensions.subjectAltName.extnValue OCTET STRING
@@ -268,102 +267,11 @@ impl Circuit {
         false, // tbsCertificate.extensions.subjectAltName.extnValue[5].type
         true,  // tbsCertificate.extensions.subjectAltName.extnValue[5].value constructed
         false, // tbsCertificate.extensions.subjectAltName.extnValue[5].value UTF8String
-        true,  // tbsCertificate.extensions.certificatePolicies
-        false, // tbsCertificate.extensions.certificatePolicies.extnID
-        false, // tbsCertificate.extensions.certificatePolicies.critical
-        true,  // tbsCertificate.extensions.certificatePolicies.extnValue OCTET STRING
-        true,  // tbsCertificate.extensions.certificatePolicies.extnValue SEQUENCE
-        true,  // tbsCertificate.extensions.certificatePolicies.extnValue SEQUENCE
-        false, // tbsCertificate.extensions.certificatePolicies.extnValue OBJECT IDENTIFIER
-        true,  // tbsCertificate.extensions.certificatePolicies.extnValue
-        true,  // tbsCertificate.extensions.certificatePolicies.extnValue
-        false, // tbsCertificate.extensions.certificatePolicies.extnValue
-        false, // tbsCertificate.extensions.certificatePolicies.extnValue
-        true,  // tbsCertificate.extensions.issuerAltName
-        false, // tbsCertificate.extensions.issuerAltName.extnID
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[0]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[0]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[0]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[0]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[1]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[1]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[1]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[1]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[2]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[2]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[2]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[2]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[3]
-        true,  // tbsCertificate.extensions.issuerAltName.extnValue[3]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[3]
-        false, // tbsCertificate.extensions.issuerAltName.extnValue[3]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnID
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[0]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[1]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[2]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[3]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[4]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
-        true,  // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
-        false, // tbsCertificate.extensions.cRLDistributionPoints.extnValue[5]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnID
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[0]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][0]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][1]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][2]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
-        true,  // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[1][3]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue[2]
-        false, // tbsCertificate.extensions.authorityKeyIdentifier.extnValue
-        true,  // tbsCertificate.extensions.subjectKeyIdentifier
-        false, // tbsCertificate.extensions.subjectKeyIdentifier.extnID
-        true,  // tbsCertificate.extensions.subjectKeyIdentifier.extnValue
-        false, // tbsCertificate.extensions.subjectKeyIdentifier.extnValue
+        false, // tbsCertificate.extensions.certificatePolicies
+        false, // tbsCertificate.extensions.issuerAltName
+        false, // tbsCertificate.extensions.cRLDistributionPoints
+        false, // tbsCertificate.extensions.authorityKeyIdentifier
+        false, // tbsCertificate.extensions.subjectKeyIdentifier
     ];
 }
 
@@ -377,7 +285,7 @@ impl plonk::Circuit<Fr> for Circuit {
 
     fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let config = Self::Config {
-            is_enabled: meta.complex_selector(),
+            is_enabled: meta.fixed_column(),
             der_byte: meta.advice_column(),
             is_type: meta.advice_column(),
             is_length: meta.advice_column(),
@@ -394,7 +302,7 @@ impl plonk::Circuit<Fr> for Circuit {
             public_objects: meta.instance_column(),
             private_objects: meta.instance_column(),
             should_disclose: meta.advice_column(),
-            disclosure: meta.instance_column(),
+            disclosure: meta.advice_column(),
             constants: meta.fixed_column(),
         };
         meta.enable_equality(config.der_byte);
@@ -414,6 +322,7 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_constant(config.constants);
 
         meta.create_gate("These columns must be either 0 or 1", |gate| {
+            let is_enabled = gate.query_fixed(config.is_enabled, Rotation::cur());
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
@@ -421,17 +330,22 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
-                is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
-                is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
-                is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                does_contain_der.clone() * (does_contain_der.clone() - Expression::Constant(Fr::one())),
-                is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
-                should_disclose.clone() * (should_disclose.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * (is_enabled.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone()
+                    * does_contain_der.clone()
+                    * (does_contain_der.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone()
+                    * should_disclose.clone()
+                    * (should_disclose.clone() - Expression::Constant(Fr::one())),
             ]
         });
 
         meta.create_gate("If one of is_type, is_length, is_payload is on, the others should be off", |gate| {
-            let is_enabled = gate.query_selector(config.is_enabled);
+            let is_enabled = gate.query_fixed(config.is_enabled, Rotation::cur());
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
@@ -446,27 +360,27 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.lookup("der_byte <= 0b11111111", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
             vec![(is_enabled * der_byte, config.byte)]
         });
 
         meta.lookup("parsed_types must be in primitive_objects if does_contain_der is 0", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
             vec![(is_enabled * not::expr(does_contain_der) * parsed_types, config.primitive_objects)]
         });
 
         meta.lookup("parsed_types must be in constructed_objects if does_contain_der is 1", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
             vec![(is_enabled * does_contain_der * parsed_types, config.constructed_objects)]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let is_below_128 = region.query_advice(config.is_below_128, Rotation::cur());
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
             let shifted = der_byte * Expression::Constant(Fr::from(1 << 1));
@@ -474,7 +388,7 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.lookup("der_byte > 0b1111111 if is_below_128 is 0", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let is_below_128 = region.query_advice(config.is_below_128, Rotation::cur());
             let is_above_128 = Expression::Constant(Fr::one()) - is_below_128;
             let der_byte = region.query_advice(config.der_byte, Rotation::cur());
@@ -489,7 +403,7 @@ impl plonk::Circuit<Fr> for Circuit {
         // The case of the first row is fine because is_payload is also constrained to be 0.
         // If is_payload = 0 no byte will be disclosed anyway.
         meta.lookup_any("parsed_types must be in public_objects if should_disclose is 1", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let public_objects = region.query_instance(config.public_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
@@ -497,7 +411,7 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.lookup_any("parsed_types must be in private_objects if should_disclose is 0", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
             let private_objects = region.query_instance(config.private_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
@@ -506,7 +420,7 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.create_gate("Constrain order of operations", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let is_payload_next = region.query_advice(config.is_payload, Rotation::next());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
@@ -558,8 +472,8 @@ impl plonk::Circuit<Fr> for Circuit {
         });
 
         meta.create_gate("Constrain value of registers", |region| {
-            let is_enabled = region.query_selector(config.is_enabled);
-            // let disclosure_next = region.query_instance(config.disclosure, Rotation::next());
+            let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
+            let disclosure_next = region.query_advice(config.disclosure, Rotation::next());
             let is_payload_cur = region.query_advice(config.is_payload, Rotation::cur());
             let parsed_bytes_next = region.query_advice(config.parsed_bytes, Rotation::next());
             let parsed_bytes_cur = region.query_advice(config.parsed_bytes, Rotation::cur());
@@ -638,13 +552,17 @@ impl plonk::Circuit<Fr> for Circuit {
                                 payload_size_cur.clone(),
                             ),
                         )),
-                // is_enabled.clone()
-                //     * (disclosure_next.clone()
-                //         - select::expr( // If we should disclose the byte and::expr([should_disclose_cur.clone(),
-                //           is_payload_cur.clone()]), // We disclose the byte der_byte_cur.clone(), // Otherwise we
-                //           write a value that's over MAX_BYTE to indicate that those bytes are // redacted
-                //           Expression::Constant(Fr::from(Self::REDACTED)),
-                //         )),
+                is_enabled.clone()
+                    * (disclosure_next.clone()
+                        - select::expr(
+                            // If we should disclose the byte
+                            and::expr([should_disclose_cur.clone(), is_payload_cur.clone()]),
+                            // We disclose the byte
+                            der_byte_cur.clone(),
+                            // Otherwise we write a value that's over MAX_BYTE to indicate that those bytes are
+                            // redacted
+                            Expression::Constant(Fr::from(Self::REDACTED)),
+                        )),
             ]
         });
 
@@ -714,7 +632,7 @@ impl plonk::Circuit<Fr> for Circuit {
 
                 for row_index in 1..(1 << Self::K) - Self::BLINDING_FACTORS {
                     // Assign action
-                    let action = if let Some(byte) = self.der_bytes.get(row_index) {
+                    let action = if let Some(byte) = self.der_bytes.get(row_index - 1) {
                         Action::Parse(*byte)
                     } else {
                         Action::DoNothing
@@ -733,7 +651,12 @@ impl plonk::Circuit<Fr> for Circuit {
                     )?;
 
                     // Enable is_enable
-                    config.is_enabled.enable(&mut region, row_index - 1)?;
+                    region.assign_fixed(
+                        || "Assign is_enabled",
+                        config.is_enabled,
+                        row_index - 1,
+                        || Value::known(Fr::one()),
+                    )?;
 
                     // Assign new state
                     state = state.update(action);
@@ -872,7 +795,7 @@ mod tests {
 
     #[test]
     fn der() {
-        let mut der_hex: String = std::env::var("SIGNER_CERTIFICATE")
+        let der_hex: String = std::env::var("SIGNER_CERTIFICATE")
             .expect("You must set $SIGNER_CERTIFICATE the certificate to use in the test");
         let mut der_bytes = hex::decode(der_hex).expect("Invalid $SIGNER_CERTIFICATE");
         der_bytes.extend(vec![0; (1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS - der_bytes.len()]);
