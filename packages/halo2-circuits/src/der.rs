@@ -1,10 +1,9 @@
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     halo2curves::bn256::Fr,
-    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, Selector, TableColumn},
+    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, TableColumn},
     poly::Rotation,
 };
-use std::collections::HashSet;
 use zkevm_gadgets::util::*;
 
 const K: usize = 14;
@@ -30,11 +29,11 @@ impl PathTable {
         should_disclose.push(true);
 
         // In the case of parsed_types = 0, should_visit does not matter because it means we're on the first row of the circuit and it's byte_kind is always Type.
-        // In the case of parsed_types = 1, we must always visit it
+        // In the case of parsed_types = 1, we must always visit it because it's the root object.
         let mut should_visit = vec![true; 2];
-        for x in path {
+        for (i, x) in path.iter().enumerate() {
             should_visit.extend(vec![false; *x as usize]);
-            should_visit.push(true);
+            should_visit.push(i != path.len() - 1);
         }
 
         Self { should_disclose, should_visit }
@@ -46,7 +45,7 @@ impl PathTable {
     }
 
     fn should_visit(&self, parsed_types: u32) -> bool {
-        self.should_visit.get(parsed_types as usize).copied().unwrap_or(true)
+        self.should_visit.get(parsed_types as usize).copied().unwrap_or(false)
     }
 }
 
@@ -88,9 +87,9 @@ struct State {
 }
 
 impl State {
-    fn new(path: &[u32]) -> State {
+    fn new(path_table: PathTable) -> State {
         State {
-            path_table: PathTable::new(&path),
+            path_table,
             header_size: 0,
             payload_size: 0,
             parsed_bytes: 0,
@@ -100,28 +99,28 @@ impl State {
         }
     }
 
-    fn is_type(self) -> bool {
+    fn is_type(&self) -> bool {
         self.byte_kind == ByteKind::Type
     }
 
-    fn is_length(self) -> bool {
+    fn is_length(&self) -> bool {
         self.byte_kind == ByteKind::Length
     }
 
-    fn is_payload(self) -> bool {
+    fn is_payload(&self) -> bool {
         self.byte_kind == ByteKind::Payload
     }
 
-    fn update(self, action: Action) -> State {
-        println!("");
-        if let Action::Parse(byte) = action {
-            println!("der_byte: 0x{:0x}", byte);
-        }
-        println!("byte_kind: {:?}", self.byte_kind);
-        println!("payload_size: 0x{:0x}", self.payload_size);
-        println!("header_size: 0x{:0x}", self.header_size);
-        println!("parsed_bytes: 0x{:0x}", self.parsed_bytes);
-        println!("parsed_types: 0x{:0x}", self.parsed_types);
+    fn update(&self, action: Action) -> State {
+        // println!("");
+        // if let Action::Parse(byte) = action {
+        //     println!("der_byte: 0x{:0x}", byte);
+        // }
+        // println!("byte_kind: {:?}", self.byte_kind);
+        // println!("payload_size: 0x{:0x}", self.payload_size);
+        // println!("header_size: 0x{:0x}", self.header_size);
+        // println!("parsed_bytes: 0x{:0x}", self.parsed_bytes);
+        // println!("parsed_types: 0x{:0x}", self.parsed_types);
 
         let mut new_state = self.clone();
         new_state.parsed_bytes += 1;
@@ -169,10 +168,16 @@ impl State {
             new_state.byte_kind = ByteKind::Type;
         }
 
+        if self.should_disclose() && self.is_payload() {
+            new_state.disclosure = action.der_byte() as u32;
+        } else {
+            new_state.disclosure = REDACTED;
+        }
+
         new_state
     }
 
-    fn should_diclose(&self) -> bool {
+    fn should_disclose(&self) -> bool {
         self.path_table.should_disclose(self.parsed_types)
     }
 
@@ -202,14 +207,14 @@ pub struct Config {
     pub parsed_bytes: Column<Advice>,
     // How many type bytes we have parsed.
     pub parsed_types: Column<Advice>,
-    pub does_contain_der: Column<Advice>,
-    pub primitive_objects: TableColumn,
-    pub constructed_objects: TableColumn,
+    pub should_visit: Column<Advice>,
+    pub objects_to_visit: TableColumn,
+    pub objects_to_skip: TableColumn,
     // 0..256
     pub byte: TableColumn,
     pub is_below_128: Column<Advice>,
-    pub public_objects: Column<Instance>,
-    pub private_objects: Column<Instance>,
+    pub public_objects: TableColumn,
+    pub private_objects: TableColumn,
     pub should_disclose: Column<Advice>,
     pub disclosure: Column<Advice>,
     pub constants: Column<Fixed>,
@@ -217,62 +222,12 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct Circuit {
-    path: Vec<u32>,
+    path_table: PathTable,
     der_bytes: Vec<u8>,
 }
 
 impl Circuit {
-    const BLINDING_FACTORS: usize = 6;
-
-    // nth item of this list constrains whether or not we should parse the payload as DER, in the case of parsed_types =
-    // n + 1. true if the object is NULL or has construted type
-    // false otherwise
-    const SHOULD_PARSE_PAYLOAD_AS_DER: [bool; 44] = [
-        true,  // tbsCertificate
-        false, // tbsCertificate.version
-        false, // tbsCertificate.serialNumber
-        false, // tbsCertificate.signature
-        false, // tbsCertificate.issuer
-        false, // tbsCertificate.validity
-        false, // tbsCertificate.subject
-        false, // tbsCertificate.subjectPublicKeyInfo
-        true,  // tbsCertificate.extensions
-        true,  // tbsCertificate.extensions SEQUENCE
-        false, // tbsCertificate.extensions.keyUsage
-        true,  // tbsCertificate.extensions.subjectAltName
-        false, // tbsCertificate.extensions.subjectAltName.extnID
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue OCTET STRING
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue SEQUENCE
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[0]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[0].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[0].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[0].value UTF8String
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[1]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[1].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[1].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[1].value UTF8String
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[2]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[2].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[2].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[2].value UTF8String
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[3]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[3].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[3].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[3].value UTF8String
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[4]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[4].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[4].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[4].value UTF8String
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[5]
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[5].type
-        true,  // tbsCertificate.extensions.subjectAltName.extnValue[5].value constructed
-        false, // tbsCertificate.extensions.subjectAltName.extnValue[5].value UTF8String
-        false, // tbsCertificate.extensions.certificatePolicies
-        false, // tbsCertificate.extensions.issuerAltName
-        false, // tbsCertificate.extensions.cRLDistributionPoints
-        false, // tbsCertificate.extensions.authorityKeyIdentifier
-        false, // tbsCertificate.extensions.subjectKeyIdentifier
-    ];
+    const BLINDING_FACTORS: usize = 17;
 }
 
 impl plonk::Circuit<Fr> for Circuit {
@@ -294,13 +249,13 @@ impl plonk::Circuit<Fr> for Circuit {
             payload_size: meta.advice_column(),
             parsed_bytes: meta.advice_column(),
             parsed_types: meta.advice_column(),
-            does_contain_der: meta.advice_column(),
-            primitive_objects: meta.lookup_table_column(),
-            constructed_objects: meta.lookup_table_column(),
+            should_visit: meta.advice_column(),
+            objects_to_visit: meta.lookup_table_column(),
+            objects_to_skip: meta.lookup_table_column(),
             byte: meta.lookup_table_column(),
             is_below_128: meta.advice_column(),
-            public_objects: meta.instance_column(),
-            private_objects: meta.instance_column(),
+            public_objects: meta.lookup_table_column(),
+            private_objects: meta.lookup_table_column(),
             should_disclose: meta.advice_column(),
             disclosure: meta.advice_column(),
             constants: meta.fixed_column(),
@@ -313,11 +268,10 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.payload_size);
         meta.enable_equality(config.parsed_bytes);
         meta.enable_equality(config.parsed_types);
-        meta.enable_equality(config.does_contain_der);
+        meta.enable_equality(config.should_visit);
         meta.enable_equality(config.is_below_128);
-        meta.enable_equality(config.public_objects);
-        meta.enable_equality(config.private_objects);
         meta.enable_equality(config.should_disclose);
+        meta.enable_equality(config.disclosure);
         meta.enable_equality(config.constants);
         meta.enable_constant(config.constants);
 
@@ -326,7 +280,7 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_type = gate.query_advice(config.is_type, Rotation::cur());
             let is_length = gate.query_advice(config.is_length, Rotation::cur());
             let is_payload = gate.query_advice(config.is_payload, Rotation::cur());
-            let does_contain_der = gate.query_advice(config.does_contain_der, Rotation::cur());
+            let should_visit = gate.query_advice(config.should_visit, Rotation::cur());
             let is_below_128 = gate.query_advice(config.is_below_128, Rotation::cur());
             let should_disclose = gate.query_advice(config.should_disclose, Rotation::cur());
             vec![
@@ -334,9 +288,7 @@ impl plonk::Circuit<Fr> for Circuit {
                 is_enabled.clone() * is_type.clone() * (is_type.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_length.clone() * (is_length.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_payload.clone() * (is_payload.clone() - Expression::Constant(Fr::one())),
-                is_enabled.clone()
-                    * does_contain_der.clone()
-                    * (does_contain_der.clone() - Expression::Constant(Fr::one())),
+                is_enabled.clone() * should_visit.clone() * (should_visit.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone() * is_below_128.clone() * (is_below_128.clone() - Expression::Constant(Fr::one())),
                 is_enabled.clone()
                     * should_disclose.clone()
@@ -365,18 +317,18 @@ impl plonk::Circuit<Fr> for Circuit {
             vec![(is_enabled * der_byte, config.byte)]
         });
 
-        meta.lookup("parsed_types must be in primitive_objects if does_contain_der is 0", |region| {
+        meta.lookup("parsed_types must be in objects_to_skip if should_visit is 0", |region| {
             let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
-            vec![(is_enabled * not::expr(does_contain_der) * parsed_types, config.primitive_objects)]
+            let should_visit = region.query_advice(config.should_visit, Rotation::cur());
+            vec![(is_enabled * not::expr(should_visit) * parsed_types, config.objects_to_skip)]
         });
 
-        meta.lookup("parsed_types must be in constructed_objects if does_contain_der is 1", |region| {
+        meta.lookup("parsed_types must be in objects_to_visit if should_visit is 1", |region| {
             let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let does_contain_der = region.query_advice(config.does_contain_der, Rotation::cur());
-            vec![(is_enabled * does_contain_der * parsed_types, config.constructed_objects)]
+            let should_visit = region.query_advice(config.should_visit, Rotation::cur());
+            vec![(is_enabled * should_visit * parsed_types, config.objects_to_visit)]
         });
 
         meta.lookup("der_byte <= 0b1111111 if is_below_128 is 1", |region| {
@@ -402,21 +354,19 @@ impl plonk::Circuit<Fr> for Circuit {
         // Exception is that the first row where parsed_types is constrained to be 0.
         // The case of the first row is fine because is_payload is also constrained to be 0.
         // If is_payload = 0 no byte will be disclosed anyway.
-        meta.lookup_any("parsed_types must be in public_objects if should_disclose is 1", |region| {
+        meta.lookup("parsed_types must be in public_objects if should_disclose is 1", |region| {
             let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let public_objects = region.query_instance(config.public_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
-            vec![(is_enabled * should_disclose * parsed_types, public_objects)]
+            vec![(is_enabled * should_disclose * parsed_types, config.public_objects)]
         });
 
-        meta.lookup_any("parsed_types must be in private_objects if should_disclose is 0", |region| {
+        meta.lookup("parsed_types must be in private_objects if should_disclose is 0", |region| {
             let is_enabled = region.query_fixed(config.is_enabled, Rotation::cur());
             let parsed_types = region.query_advice(config.parsed_types, Rotation::cur());
-            let private_objects = region.query_instance(config.private_objects, Rotation::cur());
             let should_disclose = region.query_advice(config.should_disclose, Rotation::cur());
             let should_hide = Expression::Constant(Fr::one()) - should_disclose;
-            vec![(is_enabled * should_hide * parsed_types, private_objects)]
+            vec![(is_enabled * should_hide * parsed_types, config.private_objects)]
         });
 
         meta.create_gate("Constrain order of operations", |region| {
@@ -429,7 +379,7 @@ impl plonk::Circuit<Fr> for Circuit {
             let is_length_cur = region.query_advice(config.is_length, Rotation::cur());
             let is_type_next = region.query_advice(config.is_type, Rotation::next());
             let is_type_cur = region.query_advice(config.is_type, Rotation::cur());
-            let does_contain_der_next = region.query_advice(config.does_contain_der, Rotation::next());
+            let should_visit_next = region.query_advice(config.should_visit, Rotation::next());
             let header_size_next = region.query_advice(config.header_size, Rotation::next());
             vec![
                 // If is_type is turned on, the previous is_type must be turned off.
@@ -441,19 +391,19 @@ impl plonk::Circuit<Fr> for Circuit {
                 // If is_payload is turned on, the previous is_type must be turned off.
                 // Because there's no such case that a payload byte follows a type byte.
                 is_enabled.clone() * is_payload_next.clone() * is_type_cur.clone(),
-                // If is_length_cur = 1 && is_length_next = 0 && does_contain_der_next = 0, then is_payload_next must
+                // If is_length_cur = 1 && is_length_next = 0 && should_visit_next = 0, then is_payload_next must
                 // be 1 Because in a primitive object payload bytes follows length bytes
                 is_enabled.clone()
                     * is_length_cur.clone()
                     * not::expr(is_length_next.clone())
-                    * not::expr(does_contain_der_next.clone())
+                    * not::expr(should_visit_next.clone())
                     * not::expr(is_payload_next.clone()),
-                // If is_length_cur = 1 && is_length_next = 0 && does_contain_der_next = 1, then is_type_next must be 1
+                // If is_length_cur = 1 && is_length_next = 0 && should_visit_next = 1, then is_type_next must be 1
                 // Because in an object that's not primitive a type byte follows length bytes
                 is_enabled.clone()
                     * is_length_cur.clone()
                     * not::expr(is_length_next.clone())
-                    * does_contain_der_next.clone()
+                    * should_visit_next.clone()
                     * not::expr(is_type_next.clone()),
                 // If is_length_cur = 1 && is_length_next = 0, then parsed_bytes must equal header_size
                 // This is to prevent an attacker from stop parsing length bytes early.
@@ -561,7 +511,7 @@ impl plonk::Circuit<Fr> for Circuit {
                             der_byte_cur.clone(),
                             // Otherwise we write a value that's over MAX_BYTE to indicate that those bytes are
                             // redacted
-                            Expression::Constant(Fr::from(Self::REDACTED)),
+                            Expression::Constant(Fr::from(REDACTED as u64)),
                         )),
             ]
         });
@@ -574,7 +524,7 @@ impl plonk::Circuit<Fr> for Circuit {
             || "DerChip",
             |mut region| {
                 // Assign initial state
-                let mut state = State::new();
+                let mut state = State::new(self.path_table.clone());
                 region.assign_advice_from_constant(
                     || "Assign is_type",
                     config.is_type,
@@ -618,19 +568,26 @@ impl plonk::Circuit<Fr> for Circuit {
                     Fr::from(state.parsed_types as u64),
                 )?;
                 region.assign_advice_from_constant(
-                    || "Assign does_contain_der",
-                    config.does_contain_der,
+                    || "Assign should_visit",
+                    config.should_visit,
                     0,
-                    Fr::from(state.does_contain_der()),
+                    Fr::from(state.should_visit()),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign should_disclose",
                     config.should_disclose,
                     0,
-                    Fr::from(self.should_disclose(state.parsed_types)),
+                    Fr::from(state.should_disclose()),
+                )?;
+                region.assign_advice_from_constant(
+                    || "Assign disclosure",
+                    config.disclosure,
+                    0,
+                    Fr::from(state.disclosure as u64),
                 )?;
 
-                for row_index in 1..(1 << Self::K) - Self::BLINDING_FACTORS {
+                for row_index in 1..(1 << K) - Self::BLINDING_FACTORS {
+                    println!("row_index: {}", row_index);
                     // Assign action
                     let action = if let Some(byte) = self.der_bytes.get(row_index - 1) {
                         Action::Parse(*byte)
@@ -703,16 +660,22 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(state.parsed_types as u64)),
                     )?;
                     region.assign_advice(
-                        || "Assign does_contain_der",
-                        config.does_contain_der,
+                        || "Assign should_visit",
+                        config.should_visit,
                         row_index,
-                        || Value::known(Fr::from(state.does_contain_der())),
+                        || Value::known(Fr::from(state.should_visit())),
                     )?;
                     region.assign_advice(
                         || "Assign should_disclose",
                         config.should_disclose,
                         row_index,
-                        || Value::known(Fr::from(self.should_disclose(state.parsed_types))),
+                        || Value::known(Fr::from(state.should_disclose())),
+                    )?;
+                    region.assign_advice_from_constant(
+                        || "Assign disclosure",
+                        config.disclosure,
+                        row_index,
+                        Fr::from(state.disclosure as u64),
                     )?;
                 }
 
@@ -720,13 +683,13 @@ impl plonk::Circuit<Fr> for Circuit {
                 region.assign_advice_from_constant(
                     || "Assign der_byte",
                     config.der_byte,
-                    (1 << Self::K) - Self::BLINDING_FACTORS - 1,
+                    (1 << K) - Self::BLINDING_FACTORS - 1,
                     Fr::from(Action::DoNothing.der_byte()),
                 )?;
                 region.assign_advice_from_constant(
                     || "Assign is_below_128",
                     config.is_below_128,
-                    (1 << Self::K) - Self::BLINDING_FACTORS - 1,
+                    (1 << K) - Self::BLINDING_FACTORS - 1,
                     Fr::from(Action::DoNothing.is_below_128()),
                 )?;
 
@@ -737,7 +700,7 @@ impl plonk::Circuit<Fr> for Circuit {
         layouter.assign_table(
             || "DerChip",
             |mut table| {
-                for row_index in 0..(1 << Self::K) - Self::BLINDING_FACTORS - 1 {
+                for row_index in 0..(1 << K) - Self::BLINDING_FACTORS {
                     let row_value = row_index & 0b11111111;
                     table.assign_cell(
                         || "List of all possible bytes",
@@ -746,28 +709,38 @@ impl plonk::Circuit<Fr> for Circuit {
                         || Value::known(Fr::from(row_value as u64)),
                     )?;
 
-                    let row_value: u64 = match Self::SHOULD_PARSE_PAYLOAD_AS_DER.get(row_index) {
-                        // While we're parsing the first object, parsed_types is 1.
-                        // There will be always a 1 difference bitween the index of the object we're parsing and
-                        // parsed_types.
-                        Some(false) => row_index as u64 + 1,
-                        Some(true) | None => 0,
-                    };
+                    let row_value: u64 =
+                        if self.path_table.should_visit(row_index as u32) { 0u64 } else { row_index as u64 };
                     table.assign_cell(
                         || "List of all objects of which contents are not serialized in DER",
-                        config.primitive_objects,
+                        config.objects_to_skip,
                         row_index,
                         || Value::known(Fr::from(row_value)),
                     )?;
 
-                    let row_value: u64 = match Self::SHOULD_PARSE_PAYLOAD_AS_DER.get(row_index) {
-                        // If we're done parsing does_contain_der must be 0
-                        Some(true) | None => row_index as u64 + 1,
-                        Some(false) => 0,
-                    };
+                    let row_value: u64 =
+                        if self.path_table.should_visit(row_index as u32) { row_index as u64 } else { 0u64 };
                     table.assign_cell(
                         || "List of all objects of which contents are serialized in DER",
-                        config.constructed_objects,
+                        config.objects_to_visit,
+                        row_index,
+                        || Value::known(Fr::from(row_value)),
+                    )?;
+
+                    let row_value: u64 =
+                        if self.path_table.should_disclose(row_index as u32) { 0u64 } else { row_index as u64 };
+                    table.assign_cell(
+                        || "List of all objects we should not disclose",
+                        config.private_objects,
+                        row_index,
+                        || Value::known(Fr::from(row_value)),
+                    )?;
+
+                    let row_value: u64 =
+                        if self.path_table.should_disclose(row_index as u32) { row_index as u64 } else { 0u64 };
+                    table.assign_cell(
+                        || "List of all objects we should disclose",
+                        config.public_objects,
                         row_index,
                         || Value::known(Fr::from(row_value)),
                     )?;
@@ -781,64 +754,25 @@ impl plonk::Circuit<Fr> for Circuit {
     }
 }
 
-impl Circuit {
-    fn should_disclose(&self, parsed_types: u32) -> bool {
-        self.public_objects.contains(&parsed_types)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::Action;
+    use crate::der::PathTable;
     use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
-    use std::collections::HashSet;
 
     #[test]
     fn der() {
-        let der_hex: String = std::env::var("SIGNER_CERTIFICATE")
-            .expect("You must set $SIGNER_CERTIFICATE the certificate to use in the test");
-        let mut der_bytes = hex::decode(der_hex).expect("Invalid $SIGNER_CERTIFICATE");
-        der_bytes.extend(vec![0; (1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS - der_bytes.len()]);
-        let circuit = super::Circuit { der_bytes, public_objects: HashSet::from_iter(vec![65]) };
+        let der_hex: String =
+            std::env::var("TBS_CERTIFICATE").expect("You must set $TBS_CERTIFICATE the certificate to use in the test");
+        let mut der_bytes = hex::decode(der_hex).expect("Invalid $TBS_CERTIFICATE");
+        der_bytes.extend(vec![0; (1 << super::K) - super::Circuit::BLINDING_FACTORS - der_bytes.len()]);
+        let path = [7, 0, 1, 1, 0, 0, 1, 0];
+        let circuit = super::Circuit { der_bytes, path_table: PathTable::new(&path) };
+        println!("should_visit0x13:{}", circuit.path_table.should_visit(0x13));
+        println!("should_disclose0x13:{}", circuit.path_table.should_disclose(0x13));
 
-        let instance_columns: Vec<Vec<Fr>> = vec![
-            (0..(1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS)
-                .map(|row_index| {
-                    let row_value =
-                        if circuit.public_objects.contains(&(row_index as u32)) { row_index as u64 } else { 0u64 };
-                    Fr::from(row_value)
-                })
-                .collect(),
-            (0..(1 << super::Circuit::K) - super::Circuit::BLINDING_FACTORS)
-                .map(|row_index| {
-                    let row_value =
-                        if circuit.public_objects.contains(&(row_index as u32)) { 0u64 } else { row_index as u64 };
-                    Fr::from(row_value)
-                })
-                .collect(),
-            std::iter::once(Fr::from(super::Circuit::REDACTED))
-                .chain((0..(1 << super::Circuit::K) - 1 - super::Circuit::BLINDING_FACTORS).scan(
-                    super::State::new(),
-                    |state, row_index| {
-                        let action = if let Some(byte) = circuit.der_bytes.get(row_index) {
-                            Action::Parse(*byte)
-                        } else {
-                            Action::DoNothing
-                        };
-                        let disclosure = if circuit.should_disclose(state.parsed_types) {
-                            if let Action::Parse(byte) = action { byte as u64 } else { super::Circuit::REDACTED }
-                        } else {
-                            super::Circuit::REDACTED
-                        };
+        let instance_columns: Vec<Vec<Fr>> = vec![];
 
-                        *state = state.update(action);
-                        Some(Fr::from(disclosure))
-                    },
-                ))
-                .collect(),
-        ];
-
-        MockProver::run(super::Circuit::K as u32, &circuit, instance_columns)
+        MockProver::run(super::K as u32, &circuit, instance_columns)
             .expect("The circuit generation failed")
             .assert_satisfied();
     }
