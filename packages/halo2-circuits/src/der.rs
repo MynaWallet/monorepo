@@ -6,12 +6,12 @@ use halo2_proofs::{
 };
 use zkevm_gadgets::util::*;
 
-const K: usize = 14;
+pub const K: usize = 14;
 const REDACTED: u32 = 1u32 << 8;
 
 // The lookup table that represents how the circuit should traverse DER.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PathTable {
+pub struct PathTable {
     // ith element of this Vec represents whether or not we should disclose an object when parsed_types = i
     should_disclose: Vec<bool>,
     // ith element of this Vec represents whether or not we should parse the contents bytes as DER when parsed_types=i
@@ -21,7 +21,7 @@ struct PathTable {
 impl PathTable {
     // This method currently supports disclosing only one object.
     // TODO: Support multiple paths
-    fn new(path: &[u32]) -> Self {
+    pub fn new(path: &[u32]) -> Self {
         let public_object = 1u32 + path.iter().map(|x| x + 1).sum::<u32>();
         // In the case of parsed_types = 0, should_disclose must be false because it's the root object.
         // If we wanna disclose all contents of the root object there's no point in selective disclosure.
@@ -222,12 +222,12 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct Circuit {
-    path_table: PathTable,
-    der_bytes: Vec<u8>,
+    pub path_table: PathTable,
+    pub der_bytes: Vec<u8>,
 }
 
 impl Circuit {
-    const BLINDING_FACTORS: usize = 17;
+    pub const BLINDING_FACTORS: usize = 17;
 }
 
 impl plonk::Circuit<Fr> for Circuit {
