@@ -765,7 +765,7 @@ impl plonk::Circuit<Fr> for Circuit {
 }
 
 impl Circuit {
-    fn instance_columns(&self) -> Vec<Vec<Fr>> {
+    pub fn instance_columns(&self) -> Vec<Vec<Fr>> {
         let mut state_log = vec![State::new(self.path_table.clone())];
         for row_index in 1..(1 << K) - Self::BLINDING_FACTORS {
             let action = match self.der_bytes.get(row_index - 1) {

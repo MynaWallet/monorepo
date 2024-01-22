@@ -169,11 +169,13 @@ fn main() {
 
                 let proof_file = BufWriter::new(File::create(proof_path).unwrap());
                 let mut proof = Keccak256Write::<_, _, Challenge255<_>>::init(proof_file);
+
+                let circuits = [circuit];
                 create_proof::<_, ProverSHPLONK<'_, Bn256>, _, _, Keccak256Write<_, _, _>, _>(
                     &trusted_setup,
                     &pk,
-                    &[circuit],
-                    &[&[]],
+                    &circuits,
+                    &[&[&circuits[0].instance_columns()[0]]],
                     OsRng,
                     &mut proof,
                 )
@@ -182,6 +184,13 @@ fn main() {
                 println!("Proof generation finished at: {:?}", std::time::Instant::now());
             }
             AppCommands::Verify { proof_path, trusted_setup_path, vk_path } => {
+                let der_hex: String = std::env::var("TBS_CERTIFICATE")
+                    .expect("You must set $TBS_CERTIFICATE the certificate to use in the test");
+                let mut der_bytes = hex::decode(der_hex).expect("Invalid $TBS_CERTIFICATE");
+                der_bytes.extend(vec![0; (1 << der::K) - der::Circuit::BLINDING_FACTORS - der_bytes.len()]);
+                let path = [7, 0, 1, 1, 0, 0, 1, 0];
+                let circuit = crate::der::Circuit { der_bytes, path_table: crate::der::PathTable::new(&path) };
+
                 let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
                 let trusted_setup =
                     ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
@@ -197,7 +206,7 @@ fn main() {
                     &trusted_setup,
                     &vk,
                     SingleStrategy::new(&trusted_setup),
-                    &[&[&[]]],
+                    &[&[&circuit.instance_columns()[0]]],
                     &mut proof,
                 );
                 assert!(result.is_ok(), "Verification failed!");
