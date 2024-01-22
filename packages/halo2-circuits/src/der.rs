@@ -1,7 +1,7 @@
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
     halo2curves::bn256::Fr,
-    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, TableColumn},
+    plonk::{self, Advice, Column, ConstraintSystem, Error, Expression, Fixed, Instance, TableColumn},
     poly::Rotation,
 };
 use zkevm_gadgets::util::*;
@@ -217,6 +217,7 @@ pub struct Config {
     pub private_objects: TableColumn,
     pub should_disclose: Column<Advice>,
     pub disclosure: Column<Advice>,
+    pub disclosure_instance: Column<Instance>,
     pub constants: Column<Fixed>,
 }
 
@@ -258,6 +259,7 @@ impl plonk::Circuit<Fr> for Circuit {
             private_objects: meta.lookup_table_column(),
             should_disclose: meta.advice_column(),
             disclosure: meta.advice_column(),
+            disclosure_instance: meta.instance_column(),
             constants: meta.fixed_column(),
         };
         meta.enable_equality(config.der_byte);
@@ -272,6 +274,7 @@ impl plonk::Circuit<Fr> for Circuit {
         meta.enable_equality(config.is_below_128);
         meta.enable_equality(config.should_disclose);
         meta.enable_equality(config.disclosure);
+        meta.enable_equality(config.disclosure_instance);
         meta.enable_equality(config.constants);
         meta.enable_constant(config.constants);
 
@@ -520,6 +523,8 @@ impl plonk::Circuit<Fr> for Circuit {
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<Fr>) -> Result<(), Error> {
+        let mut disclosure_cells: Vec<Option<Cell>> = vec![None; (1 << K) - Self::BLINDING_FACTORS];
+
         layouter.assign_region(
             || "DerChip",
             |mut region| {
@@ -579,15 +584,15 @@ impl plonk::Circuit<Fr> for Circuit {
                     0,
                     Fr::from(state.should_disclose()),
                 )?;
-                region.assign_advice_from_constant(
+                let disclosure = region.assign_advice_from_constant(
                     || "Assign disclosure",
                     config.disclosure,
                     0,
                     Fr::from(state.disclosure as u64),
                 )?;
+                disclosure_cells[0] = Some(disclosure.cell());
 
                 for row_index in 1..(1 << K) - Self::BLINDING_FACTORS {
-                    println!("row_index: {}", row_index);
                     // Assign action
                     let action = if let Some(byte) = self.der_bytes.get(row_index - 1) {
                         Action::Parse(*byte)
@@ -671,12 +676,13 @@ impl plonk::Circuit<Fr> for Circuit {
                         row_index,
                         || Value::known(Fr::from(state.should_disclose())),
                     )?;
-                    region.assign_advice_from_constant(
+                    let disclosure = region.assign_advice(
                         || "Assign disclosure",
                         config.disclosure,
                         row_index,
-                        Fr::from(state.disclosure as u64),
+                        || Value::known(Fr::from(state.disclosure as u64)),
                     )?;
+                    disclosure_cells[row_index] = Some(disclosure.cell());
                 }
 
                 // Assign the last action.
@@ -696,6 +702,10 @@ impl plonk::Circuit<Fr> for Circuit {
                 Ok(())
             },
         )?;
+
+        for (row_index, disclosure_cell) in disclosure_cells.into_iter().enumerate() {
+            layouter.constrain_instance(disclosure_cell.unwrap(), config.disclosure_instance, row_index)?;
+        }
 
         layouter.assign_table(
             || "DerChip",
@@ -754,10 +764,25 @@ impl plonk::Circuit<Fr> for Circuit {
     }
 }
 
+impl Circuit {
+    fn instance_columns(&self) -> Vec<Vec<Fr>> {
+        let mut state_log = vec![State::new(self.path_table.clone())];
+        for row_index in 1..(1 << K) - Self::BLINDING_FACTORS {
+            let action = match self.der_bytes.get(row_index - 1) {
+                Some(der_byte) => Action::Parse(*der_byte),
+                None => Action::DoNothing,
+            };
+            state_log.push(state_log.last().unwrap().update(action));
+        }
+
+        vec![state_log.into_iter().map(|state| Fr::from(state.disclosure as u64)).collect()]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::der::PathTable;
-    use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
+    use halo2_proofs::dev::MockProver;
 
     #[test]
     fn der() {
@@ -770,9 +795,7 @@ mod tests {
         println!("should_visit0x13:{}", circuit.path_table.should_visit(0x13));
         println!("should_disclose0x13:{}", circuit.path_table.should_disclose(0x13));
 
-        let instance_columns: Vec<Vec<Fr>> = vec![];
-
-        MockProver::run(super::K as u32, &circuit, instance_columns)
+        MockProver::run(super::K as u32, &circuit, circuit.instance_columns())
             .expect("The circuit generation failed")
             .assert_satisfied();
     }
