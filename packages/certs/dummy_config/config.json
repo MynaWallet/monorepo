@@ -1,0 +1,16 @@
+{
+    "serialNumber": "1",
+    "notBefore": "2020-01-01T19:00:00.000Z",
+    "notAfter": "2025-01-01T19:00:00.000Z",
+    "issuedPrefecture": "Tokyo-to",
+    "issuedCity": "Shibuya-ku",
+    "issuedTiming": "2020010110101012345123456789",
+    "name": "なかもと　さとし",
+    "dateOfBirth": "420081031",
+    "sex": "1",
+    "address": "東京都港区芝公園４丁目２番地８",
+    "altName": "0000",
+    "altAddress": "00000000000000000000000000000000000000000",
+    "crlPrefecture": "Tokyo-to",
+    "crlCity": "Shibuya-ku CRLDP"
+}
