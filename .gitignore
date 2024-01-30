@@ -2,7 +2,7 @@ node_modules/
 .DS_Store
 .env
 target/
-packages/certs/secret*
-packages/certs/der*
+packages/certs/secret_cert.pem
 packages/certs/myna_new_cert.pem
-packages/certs/*.json
+packages/certs/tbsInBits.json
+packages/certs/dist
