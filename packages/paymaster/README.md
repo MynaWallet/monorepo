@@ -1,7 +1,7 @@
 
-# MynaWallet APIs
+# MynaWallet Paymaster API
 
-This repository contains the source code for the MynaWallet APIs. The MynaWallet APIs are a set of REST APIs that allow users to interact with the MynaWallet application. The MynaWallet APIs are written in Rust and use the axum web framework.
+This repository contains example paymaster API server for MynaWallet.
 
 ## Installation
 
@@ -10,10 +10,12 @@ To install this project, you will need to have Rust and Cargo installed on your 
 Once you have Rust and Cargo installed, you can clone this repository and build the project using the following commands:
 
 ```bash
-git clone
-cd myna-wallet-api
 cargo build
 ```
+
+## Preparing the environment
+
+Copy .env.example to .env and fill in the required environment variables.
 
 ## Development
 
