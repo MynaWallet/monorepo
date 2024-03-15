@@ -1,18 +1,34 @@
 use clap::{Parser, Subcommand};
 use halo2_base::{
-    gates::circuit::builder::BaseCircuitBuilder, halo2_proofs::halo2curves::bn256::Fr,
-    halo2_proofs::plonk::Circuit, utils::fs::gen_srs,
+    gates::circuit::{builder::BaseCircuitBuilder, CircuitBuilderStage},
+    halo2_proofs::{
+        halo2curves::bn256::{Bn256, Fr, G1Affine},
+        plonk::{keygen_pk, keygen_vk, verify_proof, Circuit, VerifyingKey},
+        poly::{
+            commitment::Params,
+            kzg::{commitment::ParamsKZG, multiopen::VerifierSHPLONK, strategy::AccumulatorStrategy},
+        },
+        transcript::TranscriptReadBuffer,
+        SerdeFormat,
+    },
 };
-use halo2_circuits::helpers::*;
+use halo2_circuits::circuit;
+use rand::rngs::OsRng;
 use snark_verifier_sdk::{
     evm::{evm_verify, gen_evm_proof_shplonk, gen_evm_verifier_shplonk, write_calldata},
-    gen_pk,
-    halo2::gen_snark_shplonk,
-    read_pk, CircuitExt,
+    halo2::{
+        aggregation::{AggregationCircuit, AggregationConfigParams, VerifierUniversality},
+        gen_snark_shplonk, read_snark,
+    },
+    read_pk,
+    snark_verifier::system::halo2::transcript::evm::EvmTranscript,
+    CircuitExt, SHPLONK,
 };
-use std::env;
-use std::fs::remove_file;
-use std::path::Path;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter, Read, Write},
+    path::Path,
+};
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -23,185 +39,484 @@ struct Cli {
 
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
-    /// Generate a setup paramter
-    GenParams {
-        /// k parameter for circuit.
-        #[arg(long)]
-        k: u32,
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
+    #[command(subcommand)]
+    App(AppCommands),
+    #[command(subcommand)]
+    Agg(AggCommands),
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum AppCommands {
+    /// Generate a trusted setup paramter
+    TrustedSetup {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
     },
-    /// Generate proving keys for RSA circuit
-    GenRsaKeys {
-        /// k parameter for circuit.
-        #[arg(long, default_value = "17")]
-        k: u32,
-        /// setup parameters path
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
-        /// proving key path
-        #[arg(long, default_value = "./build/rsa.pk")]
+    /// Generate the proving key and the verification key for RSA circuit
+    Keys {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
+        /// verification key path. output
+        #[arg(long, default_value = "./build/app/vk")]
+        vk_path: String,
+        /// proving key path. output
+        #[arg(long, default_value = "./build/app/pk")]
         pk_path: String,
-        #[arg(long, default_value = "./certs/myna_cert.pem")]
-        verify_cert_path: String,
-        #[arg(long, default_value = "./certs/ca_cert.pem")]
-        issuer_cert_path: String,
     },
-    ProveRsa {
-        /// k parameter for circuit.
-        #[arg(long, default_value = "17")]
-        k: u32,
-        /// setup parameters path
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
-        /// proving key path
-        #[arg(long, default_value = "./build/rsa.pk")]
+    Prove {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
+        /// proving key path. input
+        #[arg(long, default_value = "./build/app/pk")]
         pk_path: String,
-        #[arg(long, default_value = "./certs/myna_cert.pem")]
-        verify_cert_path: String,
-        #[arg(long, default_value = "./certs/ca_cert.pem")]
-        issuer_cert_path: String,
-        /// output proof file
-        #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
+        /// proof path. output
+        #[arg(long, default_value = "./build/app/proof")]
         proof_path: String,
-    },
-    GenRsaVerifyEVMProof {
-        /// k parameter for circuit.
-        #[arg(long, default_value = "17")]
-        k: u32,
-        /// setup parameters path
-        #[arg(short, long, default_value = "./params")]
-        params_path: String,
-        /// proving key path
-        #[arg(long, default_value = "./build/rsa.pk")]
-        pk_path: String,
+        // citizen's certificate. input
         #[arg(long, default_value = "./certs/myna_cert.pem")]
         verify_cert_path: String,
+        // nation's certificate. input
         #[arg(long, default_value = "./certs/ca_cert.pem")]
         issuer_cert_path: String,
-        /// output proof file
-        #[arg(long, default_value = "./build/myna_verify_rsa.proof")]
+        #[arg(default_value = "42")]
+        password: u64,
+    },
+    Verify {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
+        /// verification key path. input
+        #[arg(long, default_value = "./build/app/vk")]
+        vk_path: String,
+        /// proof path. input
+        #[arg(long, default_value = "./build/app/proof")]
         proof_path: String,
+        // citizen's certificate. inut
+        #[arg(long, default_value = "./certs/myna_cert.pem")]
+        verify_cert_path: String,
+        // nation's certificate. input
+        #[arg(long, default_value = "./certs/ca_cert.pem")]
+        issuer_cert_path: String,
+        #[arg(default_value = "42")]
+        password: u64,
+    },
+    Evm {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
+        /// verification key path. input
+        #[arg(long, default_value = "./build/app/vk")]
+        vk_path: String,
+        /// proof path. input
+        #[arg(long, default_value = "./build/app/proof")]
+        proof_path: String,
+        /// verifier.sol path. output
+        #[arg(short, long, default_value = "./build/app/verifier.sol")]
+        solidity_path: String,
+        /// calldata path. output
+        #[arg(long, default_value = "./build/app/calldata.txt")]
+        calldata_path: String,
+    },
+    Snark {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/app/trusted_setup")]
+        trusted_setup_path: String,
+        /// proving key path. input
+        #[arg(long, default_value = "./build/app/pk")]
+        pk_path: String,
+        /// partial proof path. output
+        #[arg(long, default_value = "./build/app/snark")]
+        snark_path: String,
+        // citizen's certificate. input
+        #[arg(long, default_value = "./certs/myna_cert.pem")]
+        verify_cert_path: String,
+        // nation's certificate. input
+        #[arg(long, default_value = "./certs/ca_cert.pem")]
+        issuer_cert_path: String,
+        #[arg(default_value = "42")]
+        password: u64,
     },
 }
 
-#[tokio::main]
-async fn main() {
+#[derive(Debug, Subcommand, Clone)]
+enum AggCommands {
+    /// Generate a trusted setup paramter
+    TrustedSetup {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/agg/trusted_setup")]
+        trusted_setup_path: String,
+    },
+    Keys {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/agg/trusted_setup")]
+        trusted_setup_path: String,
+        /// partial proof path. input
+        #[arg(long, default_value = "./build/app/snark")]
+        snark_path: String,
+        /// verification key path. output
+        #[arg(long, default_value = "./build/agg/vk")]
+        vk_path: String,
+        /// proving key path. output
+        #[arg(long, default_value = "./build/agg/pk")]
+        pk_path: String,
+        /// break points path. output
+        #[arg(long, default_value = "./build/agg/break_points")]
+        break_points_path: String,
+    },
+    Prove {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/agg/trusted_setup")]
+        trusted_setup_path: String,
+        /// proving key path. input
+        #[arg(long, default_value = "./build/agg/pk")]
+        pk_path: String,
+        /// partial proof path. input
+        #[arg(long, default_value = "./build/app/snark")]
+        snark_path: String,
+        /// break points path. input
+        #[arg(long, default_value = "./build/agg/break_points")]
+        break_points_path: String,
+        /// proof path. output
+        #[arg(long, default_value = "./build/agg/proof")]
+        proof_path: String,
+    },
+    Verify {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/agg/trusted_setup")]
+        trusted_setup_path: String,
+        /// verification key path. input
+        #[arg(long, default_value = "./build/agg/vk")]
+        vk_path: String,
+        /// proof path. input
+        #[arg(long, default_value = "./build/agg/proof")]
+        proof_path: String,
+        /// partial proof path. input
+        #[arg(long, default_value = "./build/app/snark")]
+        snark_path: String,
+    },
+    Evm {
+        /// trusted setup parameters path. input
+        #[arg(short, long, default_value = "./build/agg/trusted_setup")]
+        trusted_setup_path: String,
+        /// verification key path. input
+        #[arg(long, default_value = "./build/agg/vk")]
+        vk_path: String,
+        /// proof path. input
+        #[arg(long, default_value = "./build/agg/proof")]
+        proof_path: String,
+        /// partial proof path. input
+        #[arg(long, default_value = "./build/app/snark")]
+        snark_path: String,
+        /// verifier.sol path. output
+        #[arg(short, long, default_value = "./build/agg/verifier.sol")]
+        solidity_path: String,
+        /// calldata path. output
+        #[arg(long, default_value = "./build/agg/calldata.txt")]
+        calldata_path: String,
+    },
+}
+
+const AGGREGATION_CONFIG: AggregationConfigParams =
+    AggregationConfigParams { degree: 23, num_advice: 7, num_fixed: 1, num_lookup_advice: 1, lookup_bits: 22 };
+
+fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::GenParams { k, params_path } => {
-            env::set_var("PARAMS_DIR", params_path);
-            gen_srs(k);
-        }
-        Commands::GenRsaKeys {
-            k,
-            params_path,
-            pk_path,
-            verify_cert_path,
-            issuer_cert_path,
-        } => {
-            env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
-
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
-
-            let builder = create_default_rsa_circuit_with_instances(
-                k as usize,
-                tbs,
-                public_key_modulus,
-                signature_bigint,
-            );
-
-            if Path::new(&pk_path).exists() {
-                match remove_file(&pk_path) {
-                    Ok(_) => println!("File found, overwriting..."),
-                    Err(e) => println!("An error occurred: {}", e),
+        Commands::App(command) => match command {
+            AppCommands::TrustedSetup { trusted_setup_path } => {
+                let trusted_setup_path = Path::new(&trusted_setup_path);
+                if trusted_setup_path.exists() {
+                    println!("Trusted setup already exists. Overwriting...");
                 }
+
+                let mut file =
+                    BufWriter::new(File::create(trusted_setup_path).expect("Failed to create a trusted setup"));
+                let trusted_setup_file = ParamsKZG::<Bn256>::setup(circuit::K as u32, OsRng);
+                trusted_setup_file.write(&mut file).expect("Failed to write a trusted setup");
             }
-            gen_pk(&params, &builder, Some(Path::new(&pk_path)));
-        }
-        Commands::ProveRsa {
-            k,
-            params_path,
-            pk_path,
-            verify_cert_path,
-            issuer_cert_path,
-            proof_path,
-        } => {
-            env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
+            AppCommands::Keys { trusted_setup_path, pk_path, vk_path } => {
+                let circuit = circuit::ProofOfJapaneseResidence::new(
+                    "./certs/ca_cert.pem".into(),
+                    "./certs/myna_cert.pem".into(),
+                    0xA42.into(),
+                );
 
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
 
-            let builder = create_default_rsa_circuit_with_instances(
-                k as usize,
-                tbs,
-                public_key_modulus,
-                signature_bigint,
-            );
-            let pk =
-                read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
+                let vk = keygen_vk(&trusted_setup, &circuit).unwrap();
+                let mut vk_file = BufWriter::new(File::create(vk_path).unwrap());
+                vk.write(&mut vk_file, SerdeFormat::RawBytes).unwrap();
 
-            if Path::new(&proof_path).exists() {
-                match remove_file(&proof_path) {
-                    Ok(_) => println!("File found, overwriting..."),
-                    Err(e) => println!("An error occurred: {}", e),
+                let pk = keygen_pk(&trusted_setup, vk, &circuit).unwrap();
+                let mut pk_file = BufWriter::new(File::create(pk_path).unwrap());
+                pk.write(&mut pk_file, SerdeFormat::RawBytes).unwrap();
+            }
+            AppCommands::Prove {
+                verify_cert_path,
+                issuer_cert_path,
+                password,
+                trusted_setup_path,
+                pk_path,
+                proof_path,
+            } => {
+                let circuit = circuit::ProofOfJapaneseResidence::new(
+                    issuer_cert_path.into(),
+                    verify_cert_path.into(),
+                    password.into(),
+                );
+                let instance_column = circuit.instance_column();
+
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
+
+                let pk = read_pk::<circuit::ProofOfJapaneseResidence>(pk_path.as_ref(), circuit.params())
+                    .expect("pk not found");
+
+                let mut proof_file = BufWriter::new(File::create(proof_path).unwrap());
+                let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit, vec![instance_column]);
+                proof_file.write_all(&proof).unwrap();
+            }
+            AppCommands::Verify {
+                proof_path,
+                verify_cert_path,
+                issuer_cert_path,
+                password,
+                trusted_setup_path,
+                vk_path,
+            } => {
+                let circuit = circuit::ProofOfJapaneseResidence::new(
+                    issuer_cert_path.into(),
+                    verify_cert_path.into(),
+                    password.into(),
+                );
+
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
+
+                let mut vk_file = File::open(vk_path).expect("vk not found.");
+                let vk = VerifyingKey::<G1Affine>::read::<_, circuit::ProofOfJapaneseResidence>(
+                    &mut vk_file,
+                    SerdeFormat::RawBytes,
+                    circuit.params(),
+                )
+                .unwrap();
+
+                let proof_file = File::open(&proof_path).unwrap();
+                let mut proof = TranscriptReadBuffer::<_, _, _>::init(&proof_file);
+                let result = verify_proof::<_, VerifierSHPLONK<'_, Bn256>, _, EvmTranscript<_, _, _, _>, _>(
+                    &trusted_setup,
+                    &vk,
+                    AccumulatorStrategy::new(&trusted_setup),
+                    &[&[&circuit.instance_column()]],
+                    &mut proof,
+                );
+                assert!(result.is_ok(), "Verification failed!");
+                println!("Verification succeeded!");
+            }
+            AppCommands::Evm { trusted_setup_path, vk_path, proof_path, solidity_path, calldata_path } => {
+                let circuit = circuit::ProofOfJapaneseResidence::new(
+                    "./certs/ca_cert.pem".into(),
+                    "./certs/myna_cert.pem".into(),
+                    0xA42.into(),
+                );
+
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
+
+                let mut proof_file = File::open(&proof_path).expect("proof not found.");
+                let mut proof: Vec<u8> = Vec::new();
+                proof_file.read_to_end(&mut proof).unwrap();
+
+                let mut vk_file = File::open(vk_path).expect("vk not found.");
+                let vk = VerifyingKey::<G1Affine>::read::<_, circuit::ProofOfJapaneseResidence>(
+                    &mut vk_file,
+                    SerdeFormat::RawBytes,
+                    circuit.params(),
+                )
+                .unwrap();
+
+                write_calldata(&[circuit.instance_column()], &proof, Path::new(&calldata_path)).unwrap();
+
+                let verifier = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
+                    &trusted_setup,
+                    &vk,
+                    vec![circuit.instance_column().len()],
+                    Some(Path::new(&solidity_path)),
+                );
+
+                evm_verify(verifier, vec![circuit.instance_column()], proof.clone());
+            }
+            AppCommands::Snark {
+                issuer_cert_path,
+                verify_cert_path,
+                password,
+                trusted_setup_path,
+                pk_path,
+                snark_path,
+            } => {
+                let circuit = circuit::ProofOfJapaneseResidence::new(
+                    issuer_cert_path.into(),
+                    verify_cert_path.into(),
+                    password.into(),
+                );
+
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
+
+                let pk = read_pk::<circuit::ProofOfJapaneseResidence>(pk_path.as_ref(), circuit.params())
+                    .expect("pk not found.");
+
+                gen_snark_shplonk(&trusted_setup, &pk, circuit, Some(&snark_path));
+            }
+        },
+        Commands::Agg(command) => match command {
+            AggCommands::TrustedSetup { trusted_setup_path } => {
+                let trusted_setup_path = Path::new(&trusted_setup_path);
+                if trusted_setup_path.exists() {
+                    println!("Trusted setup already exists. Overwriting...");
                 }
+
+                let mut file =
+                    BufWriter::new(File::create(trusted_setup_path).expect("Failed to create a trusted setup"));
+                let trusted_setup_file = ParamsKZG::<Bn256>::setup(AGGREGATION_CONFIG.degree, OsRng);
+                trusted_setup_file.write(&mut file).expect("Failed to write a trusted setup");
             }
-            gen_snark_shplonk(&params, &pk, builder.clone(), Some(Path::new(&proof_path)));
-        }
-        Commands::GenRsaVerifyEVMProof {
-            k,
-            params_path,
-            pk_path,
-            verify_cert_path,
-            issuer_cert_path,
-            proof_path,
-        } => {
-            env::set_var("PARAMS_DIR", params_path);
-            let params = gen_srs(k);
+            AggCommands::Keys { trusted_setup_path, break_points_path, snark_path, pk_path, vk_path } => {
+                let snark = read_snark(&snark_path).expect("proof not found.");
 
-            let (tbs, signature_bigint) = extract_tbs_and_sig(&verify_cert_path);
-            let public_key_modulus = extract_public_key(&issuer_cert_path);
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
 
-            let builder = create_default_rsa_circuit_with_instances(
-                k as usize,
-                tbs,
-                public_key_modulus,
-                signature_bigint,
-            );
-            let pk =
-                read_pk::<BaseCircuitBuilder<Fr>>(Path::new(&pk_path), builder.params()).unwrap();
+                let circuit = AggregationCircuit::new::<SHPLONK>(
+                    CircuitBuilderStage::Keygen,
+                    AGGREGATION_CONFIG,
+                    &trusted_setup,
+                    vec![snark],
+                    VerifierUniversality::None,
+                );
 
-            if Path::new(&proof_path).exists() {
-                match remove_file(&proof_path) {
-                    Ok(_) => println!("File found, overwriting..."),
-                    Err(e) => println!("An error occurred: {}", e),
-                }
+                let vk = keygen_vk(&trusted_setup, &circuit).unwrap();
+                let mut vk_file = BufWriter::new(File::create(vk_path).unwrap());
+                vk.write(&mut vk_file, SerdeFormat::RawBytes).unwrap();
+
+                let pk = keygen_pk(&trusted_setup, vk, &circuit).unwrap();
+                let mut pk_file = BufWriter::new(File::create(pk_path).unwrap());
+                pk.write(&mut pk_file, SerdeFormat::RawBytes).unwrap();
+
+                let mut break_points_file = BufWriter::new(File::create(break_points_path).unwrap());
+                bincode::serialize_into(&mut break_points_file, &circuit.break_points()).unwrap();
             }
-            gen_snark_shplonk(&params, &pk, builder.clone(), Some(Path::new(&proof_path)));
+            AggCommands::Prove { trusted_setup_path, pk_path, break_points_path, snark_path, proof_path } => {
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
 
-            let deployment_code = gen_evm_verifier_shplonk::<BaseCircuitBuilder<Fr>>(
-                &params,
-                pk.get_vk(),
-                builder.num_instance(),
-                Some(Path::new("./build/VerifyRsa.sol")),
-            );
+                let pk = read_pk::<AggregationCircuit>(pk_path.as_ref(), AGGREGATION_CONFIG).expect("pk not found.");
+                let snark = read_snark(&snark_path).expect("proof not fonud.");
 
-            let proof = gen_evm_proof_shplonk(&params, &pk, builder.clone(), builder.instances());
+                let break_points_file = BufReader::new(File::open(break_points_path).expect("break points not found."));
+                let break_points = bincode::deserialize_from(break_points_file).unwrap();
 
-            println!("Size of the contract: {} bytes", deployment_code.len());
-            println!("Deploying contract...");
+                let circuit = AggregationCircuit::new::<SHPLONK>(
+                    CircuitBuilderStage::Prover,
+                    AGGREGATION_CONFIG,
+                    &trusted_setup,
+                    vec![snark],
+                    VerifierUniversality::None,
+                )
+                .use_break_points(break_points);
+                let instance_columns = circuit.instances();
 
-            evm_verify(deployment_code, builder.instances(), proof.clone());
+                let mut proof_file = BufWriter::new(File::create(proof_path).unwrap());
+                let proof = gen_evm_proof_shplonk(&trusted_setup, &pk, circuit, instance_columns);
+                proof_file.write_all(&proof).unwrap();
+            }
+            AggCommands::Verify { snark_path, proof_path, trusted_setup_path, vk_path } => {
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
 
-            println!("Verification success!");
+                let snark = read_snark(&snark_path).expect("proof not found.");
 
-            write_calldata(&builder.instances(), &proof, Path::new("./build/calldata.txt")).unwrap();
-            println!("Succesfully generate calldata!");
-           
-        }
+                let circuit = AggregationCircuit::new::<SHPLONK>(
+                    CircuitBuilderStage::Prover,
+                    AGGREGATION_CONFIG,
+                    &trusted_setup,
+                    vec![snark],
+                    VerifierUniversality::None,
+                );
+
+                let mut vk_file = File::open(vk_path).expect("vk not found.");
+                let vk = VerifyingKey::<G1Affine>::read::<_, AggregationCircuit>(
+                    &mut vk_file,
+                    SerdeFormat::RawBytes,
+                    AGGREGATION_CONFIG,
+                )
+                .expect("vk not found.");
+
+                let proof_file = File::open(&proof_path).expect("proof not found.");
+                let mut proof = TranscriptReadBuffer::<_, _, _>::init(&proof_file);
+
+                let instances = circuit.instances();
+                let instance_refs: Vec<&[Fr]> = instances.iter().map(|x| x.as_ref()).collect();
+
+                let result = verify_proof::<_, VerifierSHPLONK<'_, Bn256>, _, EvmTranscript<_, _, _, _>, _>(
+                    &trusted_setup,
+                    &vk,
+                    AccumulatorStrategy::new(&trusted_setup),
+                    &[&instance_refs],
+                    &mut proof,
+                );
+                assert!(result.is_ok(), "Verification failed!");
+                println!("Verification succeeded!");
+            }
+            AggCommands::Evm { trusted_setup_path, vk_path, proof_path, snark_path, solidity_path, calldata_path } => {
+                let mut trusted_setup_file = File::open(trusted_setup_path).expect("Couldn't open the trusted setup");
+                let trusted_setup =
+                    ParamsKZG::<Bn256>::read_custom(&mut trusted_setup_file, SerdeFormat::RawBytes).unwrap();
+
+                let snark = read_snark(&snark_path).expect("proof not found.");
+
+                let mut vk_file = File::open(vk_path).expect("vk not found.");
+                let vk = VerifyingKey::<G1Affine>::read::<_, AggregationCircuit>(
+                    &mut vk_file,
+                    SerdeFormat::RawBytes,
+                    AGGREGATION_CONFIG,
+                )
+                .expect("vk not found.");
+
+                let mut proof_file = File::open(&proof_path).expect("proof not found.");
+                let mut proof: Vec<u8> = Vec::new();
+                proof_file.read_to_end(&mut proof).unwrap();
+
+                let circuit = AggregationCircuit::new::<SHPLONK>(
+                    CircuitBuilderStage::Prover,
+                    AGGREGATION_CONFIG,
+                    &trusted_setup,
+                    vec![snark],
+                    VerifierUniversality::None,
+                );
+
+                write_calldata(&circuit.instances(), &proof, Path::new(&calldata_path)).unwrap();
+
+                let verifier = gen_evm_verifier_shplonk::<AggregationCircuit>(
+                    &trusted_setup,
+                    &vk,
+                    circuit.num_instance(),
+                    Some(Path::new(&solidity_path)),
+                );
+                evm_verify(verifier, circuit.instances(), proof);
+            }
+        },
     }
 }
